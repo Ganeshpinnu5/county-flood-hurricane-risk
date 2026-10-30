@@ -279,15 +279,79 @@ function eventList(fips) {
     return;
   }
   el("d-events").innerHTML = evs.map((e) => `
-    <button class="evt" data-begin="${e.begin}">
-      <span class="evt-d">${dayName(e.begin)}${
-        e.end !== e.begin ? ` &rarr; ${dayName(e.end)}` : ""}</span>
-      <span class="pill ${e.hazard}">${
-        e.hazard === "both" ? "flood + storm" : e.hazard}</span>
-      <span class="evt-t">${e.type} — ${e.title}</span>
-    </button>`).join("");
+    <div class="evt-wrap">
+      <button class="evt" data-begin="${e.begin}">
+        <span class="evt-d">${dayName(e.begin)}${
+          e.end !== e.begin ? ` &rarr; ${dayName(e.end)}` : ""}</span>
+        <span class="pill ${e.hazard}">${
+          e.hazard === "both" ? "flood + storm" : e.hazard}</span>
+        <span class="evt-t">${e.type} — ${e.title}</span>
+      </button>
+      ${verdict(e)}
+    </div>`).join("");
   el("d-events").querySelectorAll(".evt").forEach((b) =>
     b.addEventListener("click", () => gotoDate(b.dataset.begin)));
+}
+
+// The model predicts onset within 3 days, so the days that decide whether it
+// saw this event coming are begin-3 .. begin-1. Anything on or after the onset
+// day is hindsight and is deliberately not shown here.
+const SPLIT_NOTE = {
+  train: ["in-sample", "This event is inside the training years, so the model "
+    + "had already seen it. Not evidence of forecasting skill."],
+  val: ["validation", "This event is in the validation years, used while "
+    + "choosing the model."],
+  test: ["out-of-sample", "This event is after the training cutoff. The model "
+    + "had never seen it, so this is a genuine forecast."],
+};
+
+function verdict(e) {
+  if (!e.pre) return "";
+  const hazards = Object.keys(e.pre);
+  const rows = hazards.map((haz) => {
+    const series = e.pre[haz];
+    const known = series.filter((v) => v != null);
+    if (!known.length) return "";
+    const peak = Math.max(...known);
+    const lv = level(peak, haz);
+    const cells = series.map((v, i) => {
+      const d = 3 - i;
+      if (v == null) return `<span class="lead-d"><b>—</b><i>${d}d</i></span>`;
+      return `<span class="lead-d" title="${pct(v)} on the day ${d} before onset">
+        <b style="color:${RAMP[level(v, haz)]}">${pct(v, 2)}</b><i>${d}d</i></span>`;
+    }).join("");
+    return `<div class="lead-row">
+      <span class="lead-h">${HAZ_LABEL[haz]}</span>
+      ${cells}
+      <span class="lead-pk" style="color:${RAMP[lv]}">${BANDS[lv]}</span>
+    </div>`;
+  }).join("");
+
+  const peakLv = Math.max(...hazards.map((h) =>
+    level(Math.max(...e.pre[h].filter((v) => v != null)), h)));
+  const caught = peakLv >= 3;
+  const [tag, note] = SPLIT_NOTE[e.split] || ["", ""];
+  const real = e.end !== e.begin
+    ? `declared ${dayName(e.begin)}, ran through ${dayName(e.end)}`
+    : `declared ${dayName(e.begin)}`;
+
+  return `<div class="vs ${caught ? "vs-hit" : "vs-miss"}">
+    <div class="vs-head">
+      <span class="vs-flag">${caught ? "Model flagged it" : "Model missed it"}</span>
+      ${tag ? `<span class="vs-split" title="${note}">${tag}</span>` : ""}
+    </div>
+    <div class="vs-col">
+      <div class="vs-lbl">What the model said in the 3 days before</div>
+      ${rows}
+      ${e.rain == null ? "" : `<div class="vs-rain">Rain the model could see
+         coming: <b>${e.rain < 10 ? e.rain.toFixed(1) : e.rain.toFixed(0)} mm</b>
+         over the following 3 days</div>`}
+    </div>
+    <div class="vs-col">
+      <div class="vs-lbl">What actually happened</div>
+      <div class="vs-real">${e.type} — ${e.title}, ${real}.</div>
+    </div>
+  </div>`;
 }
 
 function gotoDate(iso) {

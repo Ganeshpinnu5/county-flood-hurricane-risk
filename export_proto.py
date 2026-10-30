@@ -79,22 +79,61 @@ def main():
         sub[f"p_{haz}"] = fn(sub)
 
     # --- per-county historical event list ---------------------------------
+    # Each event also carries what the model said beforehand, so the dashboard
+    # can put the forecast next to the outcome. The model predicts onset within
+    # the next 3 days, so the days that count are begin-3 .. begin-1 -- scoring
+    # the onset day itself would be reading the answer off the label.
+    scored = sub.set_index(["county_fips", "DATE"])
+    split_of = {}
+    for name, (a, b) in metrics["splits"].items():
+        for y in range(a, b + 1):
+            split_of[y] = name
+
+    def lead_up(fips, begin, hazards):
+        days = [begin - pd.Timedelta(days=k) for k in (3, 2, 1)]
+        pre = {}
+        for haz in hazards:
+            vals = []
+            for t in days:
+                try:
+                    vals.append(round(float(scored.loc[(fips, t), f"p_{haz}"]), 5))
+                except KeyError:
+                    vals.append(None)
+            if any(v is not None for v in vals):
+                pre[haz] = vals
+        try:
+            rain = scored.loc[(fips, days[-1]), "prcp_fwd3"]
+            rain = None if pd.isna(rain) else round(float(rain), 1)
+        except KeyError:
+            rain = None
+        return pre, rain
+
     ev_out = {}
     for r in events.sort_values("begin", ascending=False).itertuples(index=False):
         haz = "flood" if r.is_flood else "storm"
         if r.is_flood and r.is_storm:
             haz = "both"
-        ev_out.setdefault(r.county_fips, []).append(
-            {
-                "begin": r.begin.strftime("%Y-%m-%d"),
-                "end": max(r.end, r.begin).strftime("%Y-%m-%d"),
-                "hazard": haz,
-                "type": r.incidentType,
-                "title": str(r.declarationTitle)[:90],
-            }
-        )
+        begin = r.begin.normalize()
+        hazards = ("flood", "storm") if haz == "both" else (haz,)
+        pre, rain = lead_up(r.county_fips, begin, hazards)
+        ev = {
+            "begin": begin.strftime("%Y-%m-%d"),
+            "end": max(r.end, r.begin).strftime("%Y-%m-%d"),
+            "hazard": haz,
+            "type": r.incidentType,
+            "title": str(r.declarationTitle)[:90],
+            "split": split_of.get(begin.year),
+        }
+        if pre:
+            ev["pre"] = pre
+            ev["rain"] = rain
+        ev_out.setdefault(r.county_fips, []).append(ev)
     for k in ev_out:
         ev_out[k] = ev_out[k][:12]
+
+    n_scored = sum(1 for v in ev_out.values() for e in v if "pre" in e)
+    print(f"events with a model lead-up: {n_scored} of "
+          f"{sum(len(v) for v in ev_out.values())}")
 
     # --- risk by date -----------------------------------------------------
     sub["d"] = sub["DATE"].dt.strftime("%Y-%m-%d")

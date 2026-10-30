@@ -129,10 +129,13 @@
         <p class="quiet">Loading from Open-Meteo&hellip;</p>
       </div>
 
-      <h3>Past flood &amp; hurricane disasters here</h3>
+      <h3>Forecast vs. what really happened</h3>
       <p class="note">
-        Real federal disaster declarations for this county. Click one to jump the
-        map to that date and see what the model would have said.
+        Every real federal disaster declaration for this county, each paired with
+        the score the model gave on the three days <em>before</em> it was declared.
+        The onset day itself is excluded — scoring it would be reading the answer.
+        Events tagged <b>out-of-sample</b> are after the training cutoff, so the
+        model had never seen them. Click any event to jump the map to that date.
       </p>
       <div id="d-events" class="events"></div>
     </div>

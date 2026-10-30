@@ -1,0 +1,9 @@
+pandas>=2.0
+numpy
+scikit-learn
+pyarrow
+xgboost
+matplotlib
+
+# make_explainer.py only
+python-docx

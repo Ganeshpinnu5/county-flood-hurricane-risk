@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>County Flood &amp; Hurricane Risk</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header>
+  <div class="titlerow">
+    <div>
+      <h1>County Flood &amp; Hurricane Risk</h1>
+      <p class="sub">
+        Every county in the lower 48. Pick one to see the live 4-day weather
+        forecast, any official National Weather Service warnings in force right
+        now, and — across the Gulf Coast, where the models are trained and
+        validated — its modelled flood and hurricane risk for a given day
+        alongside the real disasters that have hit it before.
+      </p>
+    </div>
+    <div class="theme" role="group" aria-label="Colour theme">
+      <button data-set-theme="dark">Dark</button>
+      <button data-set-theme="light">Light</button>
+    </div>
+  </div>
+  <p class="note" id="proto-banner"></p>
+</header>
+
+<div class="controls">
+  <div class="ctl">
+    <span class="ctl-label">View</span>
+    <div class="seg" id="mode-seg">
+      <button data-mode="live" class="on">Live forecast</button>
+      <button data-mode="history">Past events</button>
+    </div>
+  </div>
+
+  <div class="ctl">
+    <span class="ctl-label">Date</span>
+    <div class="daybar">
+      <button id="d-prev" title="Previous day">&larr;</button>
+      <input type="date" id="d-date">
+      <button id="d-next" title="Next day">&rarr;</button>
+    </div>
+  </div>
+
+  <div class="ctl">
+    <span class="ctl-label">Map shows</span>
+    <div class="seg" id="haz-seg">
+      <button data-haz="flood" class="on">Flood risk</button>
+      <button data-haz="storm">Hurricane risk</button>
+    </div>
+  </div>
+</div>
+
+<p class="note" id="date-note"></p>
+
+<div class="layout">
+  <!-- ----------------------------------------------------------- map -->
+  <div class="mapcol">
+    <div class="mapwrap">
+      <svg id="map" class="map" viewBox="0 0 960 560" role="img"
+           aria-label="Gulf Coast counties shaded by hazard risk"></svg>
+      <div class="legend" id="legend"></div>
+    </div>
+    <p class="quiet" id="map-foot"></p>
+
+    <h3>Highest risk on this date</h3>
+    <table id="top-table">
+      <thead><tr>
+        <th>#</th><th>County</th><th class="num">Flood</th>
+        <th class="num">Hurricane</th><th class="num">3-day rain</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- -------------------------------------------------------- detail -->
+  <aside class="detail" id="detail">
+    <div class="empty" id="detail-empty">
+      <p><strong>Select a county</strong></p>
+      <p class="quiet">
+        Click any county on the map, or pick one below. Shaded counties carry a
+        model risk score; every other county still returns live weather and
+        official warnings.
+      </p>
+      <label class="pickwrap">
+        <span class="ctl-label">Jump to county</span>
+        <select id="county-pick"></select>
+      </label>
+    </div>
+
+    <div id="detail-body" class="hidden">
+      <div class="dhead">
+        <div>
+          <h2 id="d-name"></h2>
+          <p class="quiet" id="d-sub"></p>
+        </div>
+        <button id="d-close" class="ghost" title="Clear selection">&times;</button>
+      </div>
+
+      <div id="d-outcome"></div>
+
+      <div class="riskgrid">
+        <div class="riskcard" id="rc-flood">
+          <span class="rc-label">Flood</span>
+          <span class="rc-band" id="rc-flood-band"></span>
+          <span class="rc-num" id="rc-flood-num"></span>
+          <div class="rc-bar"><i id="rc-flood-bar"></i></div>
+        </div>
+        <div class="riskcard" id="rc-storm">
+          <span class="rc-label">Hurricane / tropical storm</span>
+          <span class="rc-band" id="rc-storm-band"></span>
+          <span class="rc-num" id="rc-storm-num"></span>
+          <div class="rc-bar"><i id="rc-storm-bar"></i></div>
+        </div>
+      </div>
+      <p class="note" id="risk-expl"></p>
+
+      <h3>Official warnings in force now</h3>
+      <div id="d-alerts" class="alerts">
+        <p class="quiet">Loading from weather.gov&hellip;</p>
+      </div>
+
+      <h3>Weather — today and the next 3 days</h3>
+      <div id="d-forecast" class="fc">
+        <p class="quiet">Loading from Open-Meteo&hellip;</p>
+      </div>
+
+      <h3>Past flood &amp; hurricane disasters here</h3>
+      <p class="note">
+        Real federal disaster declarations for this county. Click one to jump the
+        map to that date and see what the model would have said.
+      </p>
+      <div id="d-events" class="events"></div>
+    </div>
+  </aside>
+</div>
+
+<!-- ---------------------------------------------------------- model card -->
+<section class="modelcard">
+  <h2>How the model works, and where it holds up</h2>
+  <div class="cards" id="mc-cards"></div>
+
+  <!-- ------------------------------------------------- transfer / headline -->
+  <h3>Does it work somewhere it has never been?</h3>
+  <p class="note">
+    The usual way to report a score is to test on counties the model already
+    trained on. That measures memory, not skill. Here each state is removed from
+    training entirely and then scored, so the number below is what the model is
+    worth in territory it has never seen.
+  </p>
+  <div class="cards transfer" id="mc-transfer"></div>
+  <p class="note" id="transfer-read"></p>
+  <table id="mc-states">
+    <thead><tr>
+      <th>Held-out state</th><th class="num">Onsets</th>
+      <th class="num">Trained on it</th><th class="num">Never seen it</th>
+      <th class="num">Retained</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+  <p class="note" id="transfer-haz"></p>
+
+  <h3>Model choice per hazard</h3>
+  <p class="note">
+    Every model was tested against simple baselines before being accepted. For
+    floods, gradient boosting <em>lost</em> to a single rainfall ratio, so the
+    simpler model was kept. That is a result, not an oversight.
+  </p>
+  <table id="mc-table">
+    <thead><tr>
+      <th>Hazard</th><th>Model kept</th><th class="num">Average precision</th>
+      <th class="num">Base rate</th><th class="num">Lift</th>
+      <th class="num">vs best baseline</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>Skill by test year</h3>
+  <p class="note">
+    The same trained model, scored separately on each year it never saw. Flat is
+    the result you want — it means the model learned a process rather than a
+    period.
+  </p>
+  <table id="mc-years">
+    <thead><tr>
+      <th>Year</th><th class="num">Flood AP</th><th class="num">Flood onsets</th>
+      <th class="num">Hurricane AP</th><th class="num">Hurricane onsets</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>Known limits</h3>
+  <ul class="limits" id="mc-limits"></ul>
+</section>
+
+<footer>
+  <span id="ft-prov"></span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

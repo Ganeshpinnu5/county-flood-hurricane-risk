@@ -14,6 +14,11 @@ artifacts/noaa/
 # the projected result in docs/data/geo.json is what the site actually loads.
 artifacts/stage4/geo_src/
 
+# The 51 CDC SVI state files build_national_static.py downloads. Same reason as
+# the Gulf SVI extract above: upstream's to publish, not ours. The script
+# re-fetches them, and only the derived constants are committed.
+refdata/cache/
+
 # Sealed runs are the audit trail, so a run directory is committed -- minus the
 # transformer weights. Nothing the site serves reads a .ckpt: the dashboard
 # takes the TFT's numbers from the run's results JSON, and the daily refresh

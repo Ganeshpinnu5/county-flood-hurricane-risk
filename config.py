@@ -14,7 +14,7 @@ DATA_DIR = COLAB_DATA_DIR if COLAB_DATA_DIR.exists() else LOCAL_DATA_DIR
 if os.environ.get("CLIMATE_DATA_DIR"):
     DATA_DIR = Path(os.environ["CLIMATE_DATA_DIR"])
 
-OUT_DIR = Path("./artifacts")
+OUT_DIR = Path(os.environ.get("CLIMATE_OUT_DIR", "./artifacts"))
 
 FILES = {
     "weather": "gulf_coast_historical.parquet",
@@ -22,6 +22,10 @@ FILES = {
     "svi": "svi_gulf_coast_counties (1).csv",
     "mapping": "station_county_mapping (1).csv",
     "stations": "gulf_coast_stations_official.csv",
+    # Observational hazard labels. FEMA above is an administrative record and is
+    # kept only as a secondary 'this event was costly' target -- see labels.py.
+    "stormevents": "stormevents",        # dir of NOAA StormEvents_details-*.csv.gz
+    "hurdat2": "hurdat2_atl.txt",        # NHC Atlantic best track
 }
 
 START_YEAR = 1990

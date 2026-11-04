@@ -9,6 +9,7 @@ Writes docs/data/live.json.
 
 import json
 import pathlib
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -25,7 +26,42 @@ FWD = 4
 STATIC = ["lat", "lon", "n_stations", "AREA_SQMI", "E_TOTPOP", "RPL_THEME1",
           "RPL_THEME4", "RPL_THEMES", "pop_density", "p95_prev3", "p95_fwd3",
           "mean_prev30"]
-STATIC_CSV = pathlib.Path(__file__).parent / "refdata" / "county_static.csv"
+REFDATA = pathlib.Path(__file__).parent / "refdata"
+STATIC_CSV = REFDATA / "county_static.csv"
+NATIONAL_CSV = REFDATA / "county_static_national.csv"
+
+# Nine of the twenty-six model features come from the static table, directly or
+# as the denominator of a ratio. A county missing any of them cannot be scored:
+# XGBoost would still return a number, because it routes NaN down a learned
+# default branch, and that number would be indistinguishable on the map from a
+# real one. Skipping is the only honest option.
+REQUIRED = ["lat", "lon", "pop_density", "RPL_THEME1", "RPL_THEME4",
+            "RPL_THEMES", "p95_prev3", "p95_fwd3", "mean_prev30"]
+
+# Open-Meteo's free tier allows 600 calls/minute. Going national takes this from
+# 356 requests to ~3,100, and at eight unthrottled workers the archive endpoint
+# started returning 429s partway through, losing whole blocks of adjacent
+# counties. Half the published ceiling costs about ten minutes and holds.
+WORKERS = 6
+MIN_INTERVAL = 0.2
+
+# A throttled run returning a fraction of the counties would overwrite a good
+# file and read on the map as the model losing coverage overnight, rather than
+# as a failed fetch. Below this share of the attempted counties, keep the old
+# file and exit non-zero so the scheduled run reports failure.
+MIN_SUCCESS = 0.9
+
+_gate = threading.Lock()
+_next_at = [0.0]
+
+
+def _throttle():
+    """Space request starts across all workers, so the cap is a rate not a burst."""
+    with _gate:
+        wait = _next_at[0] - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _next_at[0] = max(time.monotonic(), _next_at[0]) + MIN_INTERVAL
 
 
 def county_static(rebuild=False):
@@ -41,10 +77,15 @@ def county_static(rebuild=False):
     in the flood model, so a cache from an older panel would quietly score every
     county against the wrong normal. Pass `rebuild=True` after a panel change.
     """
-    if STATIC_CSV.exists() and not rebuild:
-        cs = pd.read_csv(STATIC_CSV, dtype={"county_fips": str})
+    src = NATIONAL_CSV if NATIONAL_CSV.exists() else STATIC_CSV
+    if src.exists() and not rebuild:
+        cs = pd.read_csv(src, dtype={"county_fips": str})
         cs["county_fips"] = cs["county_fips"].str.zfill(5)
-        return cs
+        full = cs[REQUIRED].notna().all(axis=1)
+        if not full.all():
+            print(f"{src.name}: {len(cs)} counties, "
+                  f"{(~full).sum()} dropped for missing constants")
+        return cs[full].reset_index(drop=True)
 
     panel = pd.read_parquet(
         OUT_DIR / "daily_panel.parquet", columns=["county_fips", "DATE"] + STATIC
@@ -70,6 +111,7 @@ def fetch(row):
     for attempt in range(4):
         if attempt:
             time.sleep(1.5 * 2 ** (attempt - 1))
+        _throttle()
         try:
             r = requests.get(
                 API,
@@ -84,6 +126,13 @@ def fetch(row):
                 },
                 timeout=30,
             )
+            # A 429 means the whole pool is over the cap, so backing off this one
+            # thread is not enough; pause every worker by pushing the shared gate.
+            if r.status_code == 429:
+                err = "429 throttled"
+                with _gate:
+                    _next_at[0] = max(_next_at[0], time.monotonic() + 20)
+                continue
             r.raise_for_status()
             return row.county_fips, r.json()["daily"], None
         except Exception as e:
@@ -152,14 +201,20 @@ def main(rebuild_static=False):
     cs = county_static(rebuild=rebuild_static)
     print(f"fetching live weather for {len(cs)} counties ...", flush=True)
 
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    t0 = time.time()
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         results = list(ex.map(fetch, list(cs.itertuples(index=False))))
 
     ok = {f: d for f, d, _ in results if d}
-    print(f"  {len(ok)}/{len(cs)} succeeded")
+    print(f"  {len(ok)}/{len(cs)} succeeded in {(time.time()-t0)/60:.1f} min")
     for f, d, err in results:
         if not d:
             print(f"  gave up on {f}: {err}")
+    if len(ok) < MIN_SUCCESS * len(cs):
+        raise SystemExit(
+            f"only {len(ok)}/{len(cs)} counties fetched "
+            f"({len(ok)/len(cs):.0%} < {MIN_SUCCESS:.0%}); leaving live.json alone"
+        )
 
     static_map = cs.set_index("county_fips")
     rows, keys = [], []

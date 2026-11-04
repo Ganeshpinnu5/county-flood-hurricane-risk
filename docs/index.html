@@ -9,21 +9,24 @@
 <body>
 
 <header>
-  <div class="titlerow">
-    <div>
-      <h1>County Flood &amp; Hurricane Risk</h1>
-      <p class="sub">
-        Pick a county for its flood and hurricane risk, the live forecast, and
-        the official warnings in force now.
-      </p>
-    </div>
+  <div class="titrow">
+    <h1>County Flood &amp; Hurricane Risk</h1>
     <div class="theme" role="group" aria-label="Colour theme">
       <button data-set-theme="dark">Dark</button>
       <button data-set-theme="light">Light</button>
     </div>
   </div>
-  <p class="note" id="proto-banner"></p>
 </header>
+
+<!-- The live cross-check, above the map because it is the one number on the
+     page that changes while you watch it. -->
+<section class="sb">
+  <div class="sb-top">
+    <h2>Model vs. National Weather Service, right now</h2>
+    <span class="sb-live"><i></i>live</span>
+  </div>
+  <div id="sb-body" class="sb-grid"></div>
+</section>
 
 <div class="controls">
   <div class="ctl">
@@ -62,9 +65,7 @@
            aria-label="Gulf Coast counties shaded by hazard risk"></svg>
       <div class="legend" id="legend"></div>
     </div>
-    <p class="quiet" id="map-foot"></p>
-
-    <h3>Highest risk on this date</h3>
+    <h3>Highest risk today</h3>
     <table id="top-table">
       <thead><tr>
         <th>#</th><th>County</th><th class="num">Flood</th>
@@ -78,12 +79,7 @@
   <aside class="detail" id="detail">
     <div class="empty" id="detail-empty">
       <p><strong>Select a county</strong></p>
-      <p class="quiet">
-        Click the map or pick one below. Shaded counties carry a risk score;
-        the rest still return live weather and warnings.
-      </p>
       <label class="pickwrap">
-        <span class="ctl-label">Jump to county</span>
         <select id="county-pick"></select>
       </label>
     </div>
@@ -113,25 +109,23 @@
           <div class="rc-bar"><i id="rc-storm-bar"></i></div>
         </div>
       </div>
-      <p class="note" id="risk-expl"></p>
-
-      <h3>Live now — official vs. model</h3>
+      <h3>Model vs. official</h3>
       <div id="d-live" class="lcheck"></div>
 
-      <h3>Risk by exact lead</h3>
+      <h3>By lead time</h3>
       <div id="d-leads" class="leadblock"></div>
 
-      <h3>Official warnings in force now</h3>
+      <h3>Warnings in force</h3>
       <div id="d-alerts" class="alerts">
         <p class="quiet">Loading from weather.gov&hellip;</p>
       </div>
 
-      <h3>Weather — today and the next 3 days</h3>
+      <h3>Forecast</h3>
       <div id="d-forecast" class="fc">
         <p class="quiet">Loading from Open-Meteo&hellip;</p>
       </div>
 
-      <h3>Past events — what the model said beforehand</h3>
+      <h3>Past events</h3>
       <div id="d-events" class="events"></div>
     </div>
   </aside>
@@ -139,12 +133,12 @@
 
 <!-- ---------------------------------------------------------- model card -->
 <section class="modelcard">
-  <div class="cards" id="mc-cards"></div>
-
   <!-- The audit trail the project is graded on, collapsed by default: the page
        is a forecast application first, and the evidence is one click away. -->
   <details class="mc">
   <summary>Model performance, limits and provenance</summary>
+
+  <div class="cards" id="mc-cards"></div>
 
   <!-- ----------------------------------------------- lead time / headline -->
   <h3>Skill by lead time</h3>

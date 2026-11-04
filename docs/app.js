@@ -10,7 +10,9 @@ const SVGNS = "http://www.w3.org/2000/svg";
 const RAMP = ["#1b5e3f", "#4caf5c", "#ffc147", "#ff8a3d", "#ff3b2f"];
 const BANDS = ["Normal", "Slightly raised", "Elevated", "High", "Very high"];
 const HAZ_LABEL = { flood: "Flood", storm: "Hurricane / tropical storm" };
-// States the risk models and the hazard event history actually cover.
+// The five states the panel was built and validated on. Only used now to gate
+// the hazard event history; which counties carry a risk score is read off the
+// live/history payload itself, so the map follows the data rather than this set.
 const MODELLED_STATES = new Set(["AL", "FL", "LA", "MS", "TX"]);
 const LEADS = [1, 2, 3];
 
@@ -129,21 +131,18 @@ function drawMap() {
     `<span class="lg-t">${HAZ_LABEL[S.haz]} risk</span>` +
     BANDS.map((b, i) =>
       `<span class="lg"><i style="background:${RAMP[i]}"></i>${b}</span>`).join("") +
-    `<span class="lg"><i class="nd"></i>outside the modelled region</span>`;
+    `<span class="lg"><i class="nd"></i>not scored</span>`;
 }
 
 function paintMap(byFips) {
   for (const [fips, { path, title }] of S.paths) {
     const r = byFips.get(fips);
-    const modelled = county(fips) && county(fips)[4];
     path.classList.toggle("nodata", !r);
     path.classList.toggle("sel", fips === S.fips);
     if (!r) {
       path.style.fill = "";
-      title.textContent = modelled
-        ? `${cname(fips)} — no risk computed for this date`
-        : `${cname(fips)} — outside the modelled region; click for live weather`
-          + " and warnings";
+      title.textContent = `${cname(fips)} — not scored on this date; click for`
+        + " live weather and warnings";
       continue;
     }
     const lv = level(r[S.haz], S.haz);
@@ -171,14 +170,10 @@ function render() {
   paintMap(byFips);
 
   el("date-note").innerHTML = S.mode === "live"
-    ? `<b>${dayName(S.date)}</b> — live forecast, pulled ${
-        hoursAgo(S.live.generated)} h ago.`
-    : `<b>${dayName(S.date)}</b> — observed rainfall, through ${
-        S.meta.observed_through}.`;
-
-  el("map-foot").textContent =
-    `${rows.length} of ${S.meta.n_counties_mapped} counties scored. ` +
-    `"High" means the top 1% of all county-days, not that a disaster is likely.`;
+    ? `<b>${dayName(S.date)}</b> · live forecast, ${
+        hoursAgo(S.live.generated)} h old · ${fmtInt(rows.length)} counties scored`
+    : `<b>${dayName(S.date)}</b> · observed rainfall · ${
+        fmtInt(rows.length)} counties scored`;
 
   const top = rows.slice().sort((a, b) => b[S.haz] - a[S.haz]).slice(0, 12);
   el("top-table").querySelector("tbody").innerHTML = top.map((r, i) => {
@@ -228,15 +223,10 @@ function paintDetail(r) {
   el("d-name").textContent = `${c[0]}, ${c[1]}`;
   el("d-sub").textContent = `FIPS ${fips} · ${c[2].toFixed(2)}, ${c[3].toFixed(2)}`;
 
-  if (!c[4]) {
-    el("d-outcome").innerHTML = MODELLED_STATES.has(c[1])
-      ? `<div class="outcome none">No weather station here in the source data, so
-         no risk is modelled. Live weather and warnings below are real.</div>`
-      : `<div class="outcome none">Risk modelling covers the five Gulf states;
-         ${c[1]} is outside it. Live weather and warnings work nationwide.</div>`;
-  } else if (!r) {
-    el("d-outcome").innerHTML =
-      `<div class="outcome none">No risk exported for this date.</div>`;
+  if (!r) {
+    el("d-outcome").innerHTML = S.mode === "history" && !c[4]
+      ? `<div class="outcome none">Past events cover the five Gulf states.</div>`
+      : `<div class="outcome none">Not scored on this date.</div>`;
   } else if (S.mode === "history" && (r.floodActive || r.stormActive)) {
     const both = r.floodActive && r.stormActive;
     const what = both
@@ -260,13 +250,6 @@ function paintDetail(r) {
     bar.style.width = lv == null ? "0%" : (lv + 1) * 20 + "%";
     bar.style.background = lv == null ? "" : RAMP[lv];
   }
-
-  el("risk-expl").innerHTML = r
-    ? `Chance of onset within ${S.meta.horizon_days} days. A normal day is
-       ${pct(S.meta.flood.test_prevalence, 3)} for floods and
-       ${pct(S.meta.storm.test_prevalence, 3)} for cyclones, so read the band,
-       not the percentage.`
-    : "";
 
   liveCheck();
   leadBlock(r);
@@ -565,11 +548,8 @@ function liveCheck() {
   const box = el("d-live");
   const fips = S.fips;
   if (!box || !fips) return;
-  const c = county(fips);
   const day = liveToday();
-  const row = c[4]
-    ? (S.live.days[day] || []).map(rowObj).find((r) => r.fips === fips)
-    : null;
+  const row = (S.live.days[day] || []).map(rowObj).find((r) => r.fips === fips);
   const pending = S.alerts.state === "loading" || S.alerts.state === "idle";
 
   const rows = ["flood", "storm"].map((haz) => {
@@ -577,7 +557,7 @@ function liveCheck() {
     const band = p == null ? null : level(p, haz);
     const mLv = band == null ? null : MODEL_LADDER[band];
     const model = band == null
-      ? lcCell("this model", "no risk", "county not modelled", null)
+      ? lcCell("this model", "—", "not scored today", null)
       : lcCell("this model", BANDS[band], pct(p), RAMP[band]);
 
     let official, verdict;
@@ -612,6 +592,188 @@ function liveCheck() {
     <button id="lc-refresh" class="ghost sm">Refresh</button>
   </div>`;
   el("lc-refresh").addEventListener("click", () => loadAlerts(fips, true));
+}
+
+// --------------------------------------- national live scoreboard (NWS)
+
+/* The per-county panel above answers "does the model agree here". This answers
+ * it across the whole country at once, which is the only form of the question
+ * that can be checked in real time.
+ *
+ * Scored as precision-at-k, not as a hit rate against a band. The obvious
+ * version -- count the counties the model puts above some band, see how many
+ * have a warning out -- is a category error: a band is a quantile of the
+ * training distribution, so "Elevated" means top 10% of all county-days and
+ * fires on about a tenth of the map every day whether or not anything is
+ * happening. On a quiet day that manufactures a terrible-looking error rate
+ * that measures the threshold, not the model.
+ *
+ * So instead: take k = the number of counties with an official product, and
+ * ask how many of them are in the model's own k highest-ranked counties. That
+ * is a like-for-like comparison at the same cutoff, it needs no threshold, and
+ * it stays meaningful when k is small. The random baseline is k/n, so the lift
+ * is what says whether the ranking carries signal.
+ *
+ * This is NOT the model's validated skill. It was trained against NOAA
+ * StormEvents and HURDAT2, not against NWS products, and a warning is a human
+ * decision about an ongoing situation while the model forecasts onset within
+ * three days. The two disagree for legitimate reasons. Treat this as a live
+ * sanity check, and the numbers in the collapsed panel as the result.
+ */
+const SB_EVENTS = [
+  "Flood Warning", "Flash Flood Warning", "Flood Advisory", "Flood Watch",
+  "Flash Flood Watch", "Coastal Flood Warning", "Coastal Flood Advisory",
+  "Coastal Flood Watch", "Hurricane Warning", "Hurricane Watch",
+  "Tropical Storm Warning", "Tropical Storm Watch", "Storm Surge Warning",
+  "Storm Surge Watch", "Hurricane Force Wind Warning",
+];
+
+const SB = { state: "idle", at: null, err: null, haz: null };
+
+/** Model live scores for the day being forecast, keyed by FIPS. */
+function liveByFips() {
+  const day = liveToday();
+  return new Map((S.live.days[day] || []).map(rowObj).map((r) => [r.fips, r]));
+}
+
+async function loadScoreboard() {
+  const box = el("sb-body");
+  if (!box) return;
+  SB.state = "loading";
+  paintScoreboard();
+  try {
+    const q = new URLSearchParams({
+      event: SB_EVENTS.join(","), status: "actual",
+    });
+    const res = await fetch(`https://api.weather.gov/alerts/active?${q}`,
+      { headers: { Accept: "application/geo+json" } });
+    if (!res.ok) throw new Error("weather.gov " + res.status);
+    const feats = (await res.json()).features || [];
+
+    // SAME is a zero-padded six-digit county code, so the leading 0 comes off
+    // to reach the five-digit FIPS the rest of the app keys on.
+    const official = { flood: new Map(), storm: new Map() };
+    for (const f of feats) {
+      const ev = (f.properties && f.properties.event) || "";
+      const rung = /warning/i.test(ev) ? 3 : /watch/i.test(ev) ? 2 : 1;
+      for (const haz of ["flood", "storm"]) {
+        if (!HAZ_RE[haz].test(ev)) continue;
+        for (const s of (f.properties.geocode || {}).SAME || []) {
+          const fips = s.length === 6 ? s.slice(1) : s;
+          if (!county(fips)) continue;
+          const cur = official[haz].get(fips);
+          if (!cur || rung > cur.rung) official[haz].set(fips, { rung, ev });
+        }
+      }
+    }
+
+    const live = liveByFips();
+    SB.haz = {};
+    for (const haz of ["flood", "storm"]) {
+      // Only counties the model actually scored today can enter the comparison;
+      // an unscored county is not a miss, it is an abstention.
+      const scored = [...live.entries()]
+        .filter(([, r]) => r[haz] != null)
+        .sort((a, b) => b[1][haz] - a[1][haz]);
+      const rank = new Map(scored.map(([f], i) => [f, i + 1]));
+      const off = [...official[haz].keys()].filter((f) => rank.has(f));
+      const k = off.length;
+      const inTopK = off.filter((f) => rank.get(f) <= k).length;
+      const ranks = off.map((f) => rank.get(f)).sort((a, b) => a - b);
+      const medRank = ranks.length
+        ? ranks[(ranks.length - 1) >> 1] / scored.length : null;
+
+      SB.haz[haz] = {
+        nOfficial: official[haz].size,
+        nScored: scored.length,
+        k, inTopK,
+        // What k random picks out of n would have caught, for contrast.
+        chance: scored.length ? (k * k) / scored.length : 0,
+        medRank,
+        top: off.map((f) => ({
+          fips: f, rung: official[haz].get(f).rung,
+          ev: official[haz].get(f).ev, rank: rank.get(f),
+          p: live.get(f)[haz], band: level(live.get(f)[haz], haz),
+        })).sort((a, b) => a.rank - b.rank).slice(0, 6),
+      };
+    }
+    SB.state = "ok";
+    SB.at = Date.now();
+    SB.err = null;
+  } catch (e) {
+    SB.state = "err";
+    SB.at = Date.now();
+    SB.err = e.message;
+  }
+  paintScoreboard();
+}
+
+function sbStat(label, value, sub, colour) {
+  return `<div class="sb-stat"><i>${label}</i>
+    <b${colour ? ` style="color:${colour}"` : ""}>${value}</b><u>${sub}</u></div>`;
+}
+
+/** Share as a percentage, or an em dash when the denominator is zero. */
+const rate = (n, d) => d ? Math.round((100 * n) / d) + "%" : "—";
+
+function paintScoreboard() {
+  const box = el("sb-body");
+  if (!box) return;
+  if (SB.state === "loading" || SB.state === "idle") {
+    box.innerHTML = `<p class="quiet">Checking weather.gov&hellip;</p>`;
+    return;
+  }
+  if (SB.state === "err") {
+    box.innerHTML = `<p class="warn">Could not reach weather.gov
+      (${SB.err}).</p>`;
+    return;
+  }
+
+  box.innerHTML = ["flood", "storm"].map((haz) => {
+    const s = SB.haz[haz];
+    if (!s.nOfficial) {
+      return `<div class="sb-row">
+        <span class="sb-h">${HAZ_LABEL[haz]}</span>
+        <span class="sb-calm">No ${haz === "flood" ? "flood" : "tropical"}
+          product in force anywhere in the country, so there is nothing to
+          compare against right now.</span></div>`;
+    }
+    if (!s.k) {
+      return `<div class="sb-row">
+        <span class="sb-h">${HAZ_LABEL[haz]}</span>
+        ${sbStat("official now", fmtInt(s.nOfficial), "counties with a product",
+          RAMP[3])}
+        <span class="sb-calm">None of them are counties the model scored today,
+          so there is no overlap to score.</span></div>`;
+    }
+    const lift = s.chance ? s.inTopK / s.chance : null;
+    const list = `<div class="sb-list">${s.top.map((t) =>
+      `<span class="sb-c" title="${t.ev} · model rank ${t.rank} of ${s.nScored}">
+         <em>${cname(t.fips)}</em>
+         <b style="color:${RAMP[t.band]}">#${t.rank}</b>
+         <u>${OFFICIAL[t.rung]}</u></span>`).join("")}</div>`;
+    return `<div class="sb-row">
+      <span class="sb-h">${HAZ_LABEL[haz]}</span>
+      ${sbStat("official now", fmtInt(s.nOfficial),
+        `${s.k} of them scored`, RAMP[3])}
+      ${sbStat(`in the model's top ${s.k}`, `${s.inTopK} / ${s.k}`,
+        `${rate(s.inTopK, s.k)} hit rate`, s.inTopK ? RAMP[1] : null)}
+      ${sbStat("vs. chance", lift == null ? "—" : `${lift.toFixed(1)}×`,
+        `${s.chance.toFixed(1)} expected at random`, null)}
+      ${sbStat("median rank", s.medRank == null ? "—"
+        : `top ${Math.max(1, Math.round(100 * s.medRank))}%`,
+        `of ${fmtInt(s.nScored)} scored`, null)}
+      ${list}
+    </div>`;
+  }).join("") + `<div class="sb-foot">
+    <span>Official: weather.gov, checked ${
+      SB.at ? new Date(SB.at).toLocaleTimeString() : "—"}. Model:
+      <b>${dayName(liveToday())}</b>, scored ${hoursAgo(S.live.generated)} h ago.
+      Warnings are not the training label, so this is a live cross-check and not
+      a skill score.</span>
+    <button id="sb-refresh" class="ghost sm">Refresh</button>
+  </div>`;
+  el("sb-refresh").addEventListener("click", loadScoreboard);
 }
 
 // ------------------------------------------------ weather (Open-Meteo)
@@ -833,11 +995,13 @@ function modelCard() {
      rainfall over the prediction window, which a forecaster would not have on
      the morning the model runs. The largest overstatement in the project; treat
      every lead-time number as an upper bound until retrained on GEFSv12.`,
-    `<b>Risk covers ${m.n_counties_modeled} of the ${m.n_counties_mapped}
-     counties on the map.</b> Five Gulf states only, and within them only
-     counties with a rainfall station in the source data.`,
-    `<b>No held-out-state validation in this run.</b> Nothing here supports a
-     claim about counties outside the Gulf Coast.`,
+    `<b>Every measured number is Gulf-only.</b> All average precision, lift and
+     baseline figures on this page were computed on the
+     ${m.n_counties_modeled}-county Gulf panel, and that is also the set the map
+     scores. Counties shown unshaded are not scored; the map does not otherwise
+     mark the boundary, so this paragraph is the disclosure. No held-out-state
+     validation exists, so nothing here would establish that the skill carries
+     outside the panel.`,
     `<b>The rainfall record has holes.</b> The median county has
      ${fmtInt(cv.median_days_per_county)} of ${fmtInt(cv.calendar_days)}
      calendar days, the worst ${fmtInt(cv.min_days_per_county)}, and
@@ -873,13 +1037,15 @@ function modelCard() {
      reloaded and confirmed to reproduce their recorded test average precision
      to five decimals before export. Payload exported ${m.generated}.`;
 
-  el("proto-banner").innerHTML =
-    `XGBoost on ${m.n_counties_modeled} Gulf Coast counties · test average
-     precision <b>${m.flood.test_ap.toFixed(3)}</b> flood
-     (${m.flood.lift_over_prevalence.toFixed(0)}× base rate),
-     <b>${m.storm.test_ap.toFixed(3)}</b> hurricane
-     (${m.storm.lift_over_prevalence.toFixed(0)}×) on
-     ${m.splits.test[0]}–${m.splits.test[1]}, unseen in training.`;
+  // The bands are quantiles of the training distribution, so what a band means
+  // belongs on the card as a tooltip rather than as a paragraph under it.
+  const tip = (haz) =>
+    `Chance of ${haz === "flood" ? "flood" : "cyclone"} onset within `
+    + `${m.horizon_days} days. "Elevated" is the top 10% of county-days, `
+    + `"High" the top 1%, "Very high" the top 0.1%. A normal day is `
+    + `${pct(m[haz].test_prevalence, 3)}, so read the band, not the percentage.`;
+  el("rc-flood").title = tip("flood");
+  el("rc-storm").title = tip("storm");
 
   el("ft-prov").textContent =
     `Risk: ${m.flood.model} at ${m.horizon_days}-day lead, run ${m.run.run_id}, ` +
@@ -933,20 +1099,29 @@ function wire() {
   el("county-pick").addEventListener("change", (e) => selectCounty(e.target.value));
 
   // Warnings are issued and cancelled on no schedule, so the official side of
-  // the comparison is re-pulled while a county stays open.
-  setInterval(() => { if (S.fips) loadAlerts(S.fips, true); }, ALERT_TTL);
+  // both comparisons is re-pulled on a timer rather than only on selection.
+  setInterval(() => {
+    if (S.fips) loadAlerts(S.fips, true);
+    loadScoreboard();
+  }, ALERT_TTL);
 }
 
+/* Grouped by state rather than by panel membership. Every county is listed so
+ * that warnings and forecast are reachable anywhere, and with ~3,100 entries the
+ * state optgroups are what make the list navigable. */
 function fillPicker() {
-  const all = Object.entries(S.meta.counties)
-    .sort((a, b) => (a[1][1] + a[1][0]).localeCompare(b[1][1] + b[1][0]));
-  const opt = ([f, c]) => `<option value="${f}">${c[0]}, ${c[1]}</option>`;
-  const group = (label, rows) =>
-    `<optgroup label="${label}">${rows.map(opt).join("")}</optgroup>`;
+  const byState = new Map();
+  for (const [f, c] of Object.entries(S.meta.counties)) {
+    if (!byState.has(c[1])) byState.set(c[1], []);
+    byState.get(c[1]).push([f, c]);
+  }
+  const opt = ([f, c]) => `<option value="${f}">${c[0]}</option>`;
   el("county-pick").innerHTML =
     `<option value="">— choose —</option>` +
-    group("Risk modelled", all.filter(([, c]) => c[4])) +
-    group("Weather & warnings only", all.filter(([, c]) => !c[4]));
+    [...byState.keys()].sort().map((st) => {
+      const rows = byState.get(st).sort((a, b) => a[1][0].localeCompare(b[1][0]));
+      return `<optgroup label="${st}">${rows.map(opt).join("")}</optgroup>`;
+    }).join("");
 }
 
 function initTheme() {
@@ -983,6 +1158,7 @@ async function boot() {
   S.date = dates()[0];
   wire();
   render();
+  loadScoreboard();
 }
 
 boot().catch((e) => {

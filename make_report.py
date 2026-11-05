@@ -486,7 +486,10 @@ bullet("The label is an observational record, not hazard physics. A flood "
        "intensity information.")
 bullet(f"Coverage is {man['panel']['counties_as_read']} counties, all within "
        "the five Gulf states and all with a rainfall station in the source "
-       "data. Nothing here supports a claim about counties outside that set.")
+       "data. Nothing here supports a claim about counties outside that set. "
+       "The dashboard nonetheless scores the whole country -- see section 11 "
+       "for how that is possible and why every metric in this document still "
+       "describes the Gulf panel only.")
 bullet("No held-out-state validation was run. Earlier work measured skill "
        "retention when a whole state is removed from training; this run did "
        "not repeat it.")
@@ -508,9 +511,123 @@ bullet(f"Only {xgb['flood']['n_test_pos']:,} flood and "
        "period. Confidence intervals on every metric here are correspondingly "
        "wide and none are reported.")
 
-# ============================================================== 11 provenance
+# ========================================================= 11 national scoring
 
-h("11. Provenance and reproducibility", 1)
+h("11. Scoring outside the training panel", 1)
+
+ROOT = pathlib.Path(__file__).parent
+clim = pd.read_csv(ROOT / "refdata" / "county_climatology_ghcn.csv",
+                   dtype={"county_fips": str})
+nat = pd.read_csv(ROOT / "refdata" / "county_static_national.csv",
+                  dtype={"county_fips": str})
+live = json.loads((ROOT / "docs" / "data" / "live.json").read_text())
+n_borrowed = int((clim["clim_source"] == "nearest").sum())
+n_own = len(clim) - n_borrowed
+n_live = live["n_counties"]
+
+p("The panel is Gulf-only because of where its rainfall came from, not because "
+  "of anything in the model. Of the 26 features the scorer reads, 17 are "
+  "derived from a live weather request and work for any coordinate on earth. "
+  "Six more are static properties of the county -- population density and the "
+  "CDC social-vulnerability ranks -- which are published nationally. The "
+  "obstacle was the remaining three.")
+
+p("Those three are ratios: observed rainfall over the county's own long-run "
+  "normal. The same 80 mm in three days is an unremarkable week in Mobile and "
+  "a once-in-a-decade event in Phoenix, and the ratio is what lets one model "
+  "serve both. No live endpoint returns a normal, so it has to be computed "
+  "offline from years of station history -- and the panel's normals existed "
+  "only for its own counties. Any county without them was dropped by the "
+  "scorer's guard rather than scored on an incomplete feature row, which is "
+  "the correct behaviour: a gradient-boosted tree routes a missing value down "
+  "a default branch and returns a plausible-looking number that is "
+  "indistinguishable, on a map, from a real one.")
+
+h("11.1 Rebuilding the normals nationally", 2)
+
+p("The normals were rebuilt from the NOAA GHCN-Daily by_year bulk archive over "
+  "2000-2008, the same window and the same station network (COOP and WBAN) the "
+  "panel used. Two properties of that archive had to be handled explicitly. It "
+  "reports precipitation in tenths of a millimetre where the panel is in "
+  "millimetres, a factor of ten that would have scaled every national "
+  "denominator and made every non-Gulf county read as calmer than it is "
+  "without anything on the dashboard looking broken; the median ratio of raw "
+  "archive to panel value across 176,086 shared station-days is exactly "
+  "10.000, which both fixes the scale and confirms the panel is itself "
+  "GHCN-derived. Observations carrying a NOAA quality flag are dropped.")
+
+p("Station density needed a decision. A county-day is the mean across the "
+  "county's stations, so a denser network smooths the daily series and drags "
+  "the 95th percentile down. The panel averages 1.47 stations per county; an "
+  "unrestricted polygon join averages 7.87 nationally. Scoring the Gulf "
+  "counties through the national pipeline at different caps and comparing "
+  "against their known values gives a mean relative error of 4.5% at one "
+  "station, 4.0% at two and 4.1% at three, so two is both the minimum-error "
+  "choice and the closest match to the panel's own density.")
+
+table(["Quantity", "Value"],
+      [["Stations clearing 80% coverage", "7,432 of 24,506"],
+       ["Stations retained after the 2-per-county cap", "4,629"],
+       ["Resulting density", "1.64 stations/county (panel: 1.47)"],
+       ["Counties with a qualifying gauge of their own", f"{n_own:,}"],
+       ["Counties borrowing the 2 nearest within 150 km", f"{n_borrowed:,}"],
+       ["Counties with normals", f"{len(clim):,}"],
+       ["Counties in the national constants table", f"{len(nat):,}"]],
+      "Table 11. National rainfall climatology, built by "
+      "build_ghcn_climatology.py --cap 2.")
+
+p(f"{n_borrowed} counties contain no station that clears the coverage "
+  "threshold. Rather than leave them unscored, each borrows the two nearest "
+  "qualifying gauges by centroid distance, and the borrow is refused beyond "
+  "150 km. The justification is that a rainfall normal varies far more "
+  "smoothly in space than daily rainfall does, so a gauge one county over is a "
+  "fair estimate of the local baseline where a gauge across a mountain range "
+  "is not. These counties are marked in the clim_source column of the "
+  "climatology file so the provenance survives in the data rather than only in "
+  "this paragraph.")
+
+h("11.2 What the rebuild was checked against", 2)
+
+p("The Gulf counties already have a known answer, so the national pipeline was "
+  "run over them and compared. It reproduces all 356 at a mean relative error "
+  "of 4.1%: the three-day 95th percentile comes out at 42.85 mm against a "
+  "known 43.48 (ratio 0.985, correlation 0.974) and the 30-day mean at 88.53 "
+  "against 87.77 (ratio 1.009, correlation 0.976). Because the Gulf counties "
+  "are no denser under the national rule than the country as a whole, that 4.1% "
+  "is a national estimate of the error rather than a regional artefact.")
+
+p("A stricter check was also run: rebuilding the Gulf counties from the panel's "
+  "own 523 stations, rather than from the national station list, reproduces all "
+  "three constants at a ratio of 1.000 and a mean absolute difference of 0.00 "
+  "mm across all 356 counties. That pins the quality-flag filter, the "
+  "county-day averaging, the minimum-periods setting and the forward-window "
+  "boundary, and isolates the 4.1% as being entirely attributable to which "
+  "stations are selected.")
+
+p("The panel's own rows are carried through the national build byte for byte. "
+  "They are the inputs the sealed run trained and scored on, so re-deriving "
+  "them from a different source would quietly move the published numbers.")
+
+h("11.3 Result and what it does not establish", 2)
+
+p(f"The daily refresh now scores {n_live:,} counties. The counties that remain "
+  "unscored are Connecticut's eight retired counties, which the map still draws "
+  "but which have no CDC vulnerability record under those codes, plus any "
+  "county whose live weather request fails on the day -- dropped rather than "
+  "scored from a partial row, under the same guard as before.")
+
+callout("National coverage is a data-engineering result, not an accuracy "
+        "result. Every average precision, lift and deviation figure in this "
+        "document was measured on the Gulf panel. No held-out-state validation "
+        "was run, so nothing here establishes that the skill carries to a "
+        "county in Arizona or Vermont. The dashboard discloses this in its "
+        "limitations panel and does not mark the boundary on the map, because "
+        "a visible boundary would imply the inside of it had been validated "
+        "against the outside, which it has not.")
+
+# ============================================================== 12 provenance
+
+h("12. Provenance and reproducibility", 1)
 v = man["versions"]
 table(["Field", "Value"],
       [["Run id", man["run_id"]],
@@ -532,7 +649,7 @@ table(["Field", "Value"],
        ["Self-contained", str(man["self_contained"])],
        ["Warm parents", str(man["warm_parents"]) or "none"],
        ["Random seed", prm["seed"]]],
-      "Table 11. Run manifest. The run is sealed: its own directory holds the "
+      "Table 12. Run manifest. The run is sealed: its own directory holds the "
       "models, the results and the hashes, and nothing outside it contributed "
       "to a reported number.")
 

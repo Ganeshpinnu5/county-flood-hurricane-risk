@@ -19,7 +19,10 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 3,101 counties at the rate limit the fetcher holds itself to is about ten
+    # minutes; the margin is for Open-Meteo throttling the runner harder than it
+    # throttles a laptop.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 

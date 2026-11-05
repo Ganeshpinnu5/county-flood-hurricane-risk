@@ -918,8 +918,8 @@ function modelCard() {
   const m = S.meta;
   el("mc-cards").innerHTML = [
     ["Question asked", `${m.horizon_days}-day lead`, m.target],
-    ["Counties modelled", `${m.n_counties_modeled} / ${m.n_counties_mapped}`,
-      "only counties with a weather station in the source data"],
+    ["Counties trained on", `${m.n_counties_modeled} / ${m.n_counties_mapped}`,
+      "the Gulf panel; the map scores the rest from the same fitted model"],
     ["Train / val / test", `${m.splits.train[0]}–${m.splits.train[1]} / ` +
       `${m.splits.val[0]}–${m.splits.val[1]} / ` +
       `${m.splits.test[0]}–${m.splits.test[1]}`,
@@ -1004,13 +1004,18 @@ function modelCard() {
      rainfall over the prediction window, which a forecaster would not have on
      the morning the model runs. The largest overstatement in the project; treat
      every lead-time number as an upper bound until retrained on GEFSv12.`,
-    `<b>Every measured number is Gulf-only.</b> All average precision, lift and
-     baseline figures on this page were computed on the
-     ${m.n_counties_modeled}-county Gulf panel, and that is also the set the map
-     scores. Counties shown unshaded are not scored; the map does not otherwise
-     mark the boundary, so this paragraph is the disclosure. No held-out-state
-     validation exists, so nothing here would establish that the skill carries
-     outside the panel.`,
+    `<b>Every measured number is Gulf-only, but the map is national.</b> All
+     average precision, lift and baseline figures on this page were computed on
+     the ${m.n_counties_modeled}-county Gulf panel. The map scores the whole
+     country and does not mark the boundary, so this paragraph is the
+     disclosure: no held-out-state validation exists, and nothing here would
+     establish that the skill carries outside the panel.`,
+    `<b>Rainfall normals outside the panel were rebuilt, not inherited.</b> Three
+     features divide observed rainfall by the county's own 2000&ndash;2008
+     normal. The panel's come from its station file; the rest were recomputed
+     from NOAA GHCN-Daily at two gauges per county, which reproduces the panel's
+     own values to 4.1% mean relative error. 313 counties have no qualifying
+     gauge and borrow the two nearest within 150 km.`,
     `<b>The rainfall record has holes.</b> The median county has
      ${fmtInt(cv.median_days_per_county)} of ${fmtInt(cv.calendar_days)}
      calendar days, the worst ${fmtInt(cv.min_days_per_county)}, and

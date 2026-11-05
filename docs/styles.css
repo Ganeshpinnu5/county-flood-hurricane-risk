@@ -302,6 +302,8 @@ body { max-width: 1320px; }
             letter-spacing: 0.5px; }
 .rc-band { font-size: 16px; font-weight: 600; }
 .rc-num { font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
+.rc-num small { display: block; margin-top: 3px; font-family: inherit;
+                font-size: 11px; opacity: 0.8; }
 .rc-bar { height: 6px; border-radius: 3px; background: var(--line);
           margin-top: 7px; overflow: hidden; }
 .rc-bar i { display: block; height: 100%; border-radius: 3px; width: 0;

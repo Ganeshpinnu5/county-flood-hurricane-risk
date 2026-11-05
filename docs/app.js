@@ -245,7 +245,16 @@ function paintDetail(r) {
     const lv = p == null ? null : level(p, haz);
     el(`rc-${haz}-band`).textContent = lv == null ? "no data" : BANDS[lv];
     el(`rc-${haz}-band`).style.color = lv == null ? "" : RAMP[lv];
-    el(`rc-${haz}-num`).textContent = p == null ? "—" : pct(p);
+    // A bare "5.3%" reads as "no risk" even when it is five times the base
+    // rate, which is how a county under an active flood warning can look calm.
+    // The multiple is the part a reader can actually judge.
+    const base = S.meta[haz].test_prevalence;
+    const x = p == null || !base ? null : p / base;
+    el(`rc-${haz}-num`).innerHTML = p == null ? "—" : pct(p) + (x == null ? ""
+      : `<small>${
+          x >= 1.5 ? `${x < 10 ? x.toFixed(1) : Math.round(x)}&times; a normal day`
+          : x <= 0.5 ? "below a normal day"
+          : "about a normal day"}</small>`);
     const bar = el(`rc-${haz}-bar`);
     bar.style.width = lv == null ? "0%" : (lv + 1) * 20 + "%";
     bar.style.background = lv == null ? "" : RAMP[lv];

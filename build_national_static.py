@@ -30,7 +30,7 @@ import requests
 ROOT = pathlib.Path(__file__).parent
 GEO = ROOT / "docs" / "data" / "geo.json"
 STATIC = ROOT / "refdata" / "county_static.csv"
-CLIM = ROOT / "refdata" / "county_climatology.csv"
+CLIM = ROOT / "refdata" / "county_climatology_ghcn.csv"
 CACHE = ROOT / "refdata" / "cache" / "svi"
 SVI_URL = "https://svi.cdc.gov/Documents/Data/2022/csv/states_counties/{}_county.csv"
 
@@ -134,7 +134,7 @@ def main():
         clim = clim.drop_duplicates("county_fips", keep="last")
         d = d.merge(clim[["county_fips", "p95_prev3", "p95_fwd3", "mean_prev30"]],
                     on="county_fips", how="left")
-        print(f"{clim.shape[0]} counties with ERA5 climatology")
+        print(f"{clim.shape[0]} counties with GHCN climatology")
     else:
         for c in ("p95_prev3", "p95_fwd3", "mean_prev30"):
             d[c] = np.nan

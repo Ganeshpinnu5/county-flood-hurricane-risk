@@ -69,7 +69,15 @@ NETWORKS = ("USC", "USW")
 MIN_COVERAGE = 0.8
 
 COLS = ["county_fips", "p95_prev3", "p95_fwd3", "mean_prev30", "n_days",
-        "n_stations_ghcn"]
+        "n_stations_ghcn", "clim_source"]
+
+# Stations borrowed from outside the county when it contains none of its own,
+# and the distance past which borrowing is refused. A rainfall *normal* varies
+# far more smoothly in space than daily rainfall does, so a gauge one county
+# over is a fair estimate of the local baseline where a gauge across a mountain
+# range is not. Counties with nothing inside this radius stay unscored.
+FALLBACK_K = 2
+FALLBACK_MAX_KM = 150.0
 
 
 def stations():
@@ -364,6 +372,64 @@ def build(keep, wanted):
     return climatology(d)
 
 
+def county_centroids():
+    """Centroid lat/lon for every county, from the national static table."""
+    d = pd.read_csv(ROOT / "refdata" / "county_static_national.csv",
+                    dtype={"county_fips": str})
+    d["county_fips"] = d["county_fips"].str.zfill(5)
+    return d.dropna(subset=["lat", "lon"])[["county_fips", "lat", "lon"]]
+
+
+def nearest_fallback(stn, qualifying, have):
+    """Assign the FALLBACK_K nearest outside stations to each stationless county.
+
+    About 290 counties contain no gauge that reports on MIN_COVERAGE of the
+    window, so a polygon join leaves them with no normal and the live scorer
+    drops them. Borrowing the closest qualifying gauges is defensible where
+    imputing a daily value would not be: these three constants are long-run
+    summaries, and the 95th percentile of three-day rainfall changes slowly
+    across a hundred kilometres of the same climate.
+
+    Marked `nearest` in the output so the dashboard can disclose it rather than
+    present a borrowed baseline as if the county had measured it.
+    """
+    cen = county_centroids()
+    missing = cen[~cen["county_fips"].isin(have)]
+    if missing.empty:
+        return pd.DataFrame(columns=["STATION", "county_fips"])
+
+    src = stn[stn["STATION"].isin(qualifying)].reset_index(drop=True)
+    slat = np.radians(src["lat"].to_numpy())
+    slon = np.radians(src["lon"].to_numpy())
+    clat = np.radians(missing["lat"].to_numpy())[:, None]
+    clon = np.radians(missing["lon"].to_numpy())[:, None]
+
+    # Haversine. 290 x 7,400 is small enough to do as one dense block.
+    dlat, dlon = slat[None, :] - clat, slon[None, :] - clon
+    a = (np.sin(dlat / 2) ** 2
+         + np.cos(clat) * np.cos(slat[None, :]) * np.sin(dlon / 2) ** 2)
+    km = 6371.0 * 2 * np.arcsin(np.sqrt(a))
+
+    idx = np.argsort(km, axis=1)[:, :FALLBACK_K]
+    rows, refused = [], 0
+    for i, fips in enumerate(missing["county_fips"].to_numpy()):
+        picked = [j for j in idx[i] if km[i, j] <= FALLBACK_MAX_KM]
+        if not picked:
+            refused += 1
+            continue
+        for j in picked:
+            rows.append((src.at[j, "STATION"], fips))
+
+    out = pd.DataFrame(rows, columns=["STATION", "county_fips"])
+    n = out["county_fips"].nunique()
+    print(f"  fallback: {n} of {len(missing)} stationless counties borrow "
+          f"{len(out)} stations within {FALLBACK_MAX_KM:.0f} km")
+    if refused:
+        print(f"  {refused} counties have no gauge within "
+              f"{FALLBACK_MAX_KM:.0f} km and stay unscored")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--verify-only", action="store_true")
@@ -375,6 +441,9 @@ def main():
                     "test on the Gulf counties, e.g. 1,2,3")
     ap.add_argument("--cap", type=int, default=0,
                     help="stations per county for the national build")
+    ap.add_argument("--fill-missing", action="store_true",
+                    help="keep the counties already built and only add the "
+                         "stationless ones via the nearest-gauge fallback")
     args = ap.parse_args()
 
     stn = stations()
@@ -436,10 +505,52 @@ def main():
         print(f"capped at {args.cap}/county: {len(sel)} stations, "
               f"{len(sel) / sel['county_fips'].nunique():.2f} per county")
 
-    print("\npass 2: county-day aggregation")
-    clim = build(sel, set(sel["STATION"]))
+    # Only the stationless counties are rebuilt, so a finished national run is
+    # topped up rather than repeated: pass 2 is ten gzip passes either way, but
+    # this keeps the counties that have their own gauge bit-identical.
+    if args.fill_missing:
+        if not OUT.exists():
+            raise SystemExit(f"{OUT.name} does not exist; run without "
+                             "--fill-missing first")
+        done = pd.read_csv(OUT, dtype={"county_fips": str})
+        done["county_fips"] = done["county_fips"].str.zfill(5)
+        if "clim_source" not in done.columns:
+            done["clim_source"] = "county"
+        have = set(done.loc[done["clim_source"] == "county", "county_fips"])
+        print(f"\n{len(have)} counties already have their own gauge")
+
+        print("\nnearest-station fallback")
+        fb = nearest_fallback(stn, good, have)
+        if fb.empty:
+            print("nothing to fill")
+            return
+
+        print("\npass 2: county-day aggregation for borrowed counties only")
+        add = build(fb, set(fb["STATION"]))
+        add["clim_source"] = "nearest"
+        clim = (pd.concat([done[done["clim_source"] == "county"], add],
+                          ignore_index=True)
+                  .drop_duplicates("county_fips", keep="first")
+                  .sort_values("county_fips").reset_index(drop=True))
+    else:
+        print("\nnearest-station fallback")
+        fb = nearest_fallback(stn, good, set(sel["county_fips"]))
+
+        print("\npass 2: county-day aggregation")
+        own = build(sel, set(sel["STATION"]))
+        own["clim_source"] = "county"
+        clim = own
+        if not fb.empty:
+            add = build(fb, set(fb["STATION"]))
+            add["clim_source"] = "nearest"
+            clim = (pd.concat([own, add], ignore_index=True)
+                      .drop_duplicates("county_fips", keep="first")
+                      .sort_values("county_fips").reset_index(drop=True))
+
     clim.to_csv(OUT, index=False, columns=COLS)
-    print(f"\nwrote {OUT} ({len(clim)} counties)")
+    n_own = (clim["clim_source"] == "county").sum()
+    print(f"\nwrote {OUT} ({len(clim)} counties: "
+          f"{n_own} own gauge, {len(clim) - n_own} borrowed)")
     for c in ("p95_prev3", "p95_fwd3", "mean_prev30"):
         print(f"  {c:12s} {clim[c].min():7.1f} - {clim[c].max():7.1f}  "
               f"mean {clim[c].mean():7.1f}")

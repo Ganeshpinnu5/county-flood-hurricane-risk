@@ -176,9 +176,15 @@ def add_labels(d, sources):
         d = d.merge(onset, on=["county_fips", "DATE"], how="left")
         d[col] = d[col].fillna(0).astype("int8")
 
+        # shift(-HORIZON) then roll HORIZON puts onsets at t+1..t+HORIZON on
+        # row t, matching the forward rainfall features above. shift(-1) would
+        # instead cover t-1..t+1, which labels a day positive for an event that
+        # began yesterday or this morning -- known at prediction time, so the
+        # model would be scored on recall rather than forecast.
         g = d.groupby("county_fips", sort=False)[col]
         d[f"y_{name}"] = (
-            g.transform(lambda s: s.shift(-1).rolling(HORIZON, min_periods=1).max())
+            g.transform(
+                lambda s: s.shift(-HORIZON).rolling(HORIZON, min_periods=1).max())
             .fillna(0).astype("int8")
         )
     return d

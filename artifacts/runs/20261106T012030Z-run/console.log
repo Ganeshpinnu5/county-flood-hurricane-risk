@@ -1,0 +1,165 @@
+run   20261106T012030Z-run
+env   local
+root  /home/runner/climate-risk-gulf
+panel /home/runner/climate-risk-gulf/artifacts/daily_panel.parquet  exists=True
+warm-start flood: xgb=False  tft=False
+warm-start storm: xgb=False  tft=False
+smoke False  tag run
+panel daily_panel.parquet  3,252,826 rows  2000-2026  labels=['y_fema_flood', 'y_fema_storm', 'y_flood', 'y_storm']
+y_storm: labels end 2024; dropping rows test 179,646
+split     years    rows  counties  flood_pos  flood_rate%  storm_pos  storm_rate%
+train 2000-2014 1867821       356      20740       1.1104       4303       0.2304
+  val 2015-2019  619985       354       7149       1.1531       1599       0.2579
+ test 2020-2026  765020       356       8020       1.0483       2246       0.3837
+wrote /home/runner/climate-risk-gulf/artifacts/runs/20261106T012030Z-run/plots/split_run.png
+=== xgboost flood ===
+  best_iteration=282  273.4s  -> xgb_flood_run.json
+=== xgboost storm ===
+  best_iteration=8  52.3s  -> xgb_storm_run.json
+=== xgboost flood ===
+  baseline single_ratio_fwd3            AP=0.19892
+  baseline single_prcp_fwd3             AP=0.19139
+  baseline single_log_fwd3              AP=0.19135
+  val   AP=0.32360  lift=28.1x
+  TEST  AP=0.26136  lift=24.9x  vs_best=1.31x
+=== xgboost storm ===
+  baseline single_prcp_fwd3             AP=0.09541
+  baseline single_log_fwd3              AP=0.09537
+  baseline single_prcp_fwd3_max         AP=0.09127
+  val   AP=0.09232  lift=35.8x
+  TEST  AP=0.15570  lift=40.6x  vs_best=1.63x
+wrote /home/runner/climate-risk-gulf/artifacts/runs/20261106T012030Z-run/results/xgb_run.json
+skipped: CRISK_SKIP_TFT=1 (TFT not attempted)
+skipped: no trained TFT
+hazard                       model  test_AP  lift  vs_baseline   verdict
+ flood baseline: single_ratio_fwd3  0.19892   NaN         1.00 reference
+ flood                     xgboost  0.26136  24.9         1.31      keep
+ storm  baseline: single_prcp_fwd3  0.09541   NaN         1.00 reference
+ storm                     xgboost  0.15570  40.6         1.63      keep
+
+=== flood - predicted vs observed, test period (765,020 county-days, 8020 real onsets) ===
+                              always_zero    base_rate    xgboost
+flood: predicted vs observed                                     
+n_rows                            765,020      765,020    765,020
+observed_events                     8,020        8,020      8,020
+observed_rate                   0.0104834    0.0104834  0.0104834
+predicted_mean                          0    0.0111038   0.011493
+bias_pred_minus_obs            -0.0104834  0.000620462  0.0010096
+predicted_sd                            0  5.20417e-18   0.051649
+observed_sd                       0.10185      0.10185    0.10185
+MAE                             0.0104834    0.0213544  0.0176067
+RMSE                             0.102388     0.101852  0.0944107
+max_abs_error                           1     0.988896    0.99988
+brier                           0.0104834    0.0103739 0.00891339
+brier_skill_vs_baserate        -0.0105945 -3.71112e-05   0.140753
+log_loss                         0.289667     0.058229  0.0387432
+calibration_error_ECE           0.0104834   0.00168745 0.00177663
+average_precision               0.0104834    0.0104834    0.26136
+lift_over_rate                          1            1    24.9309
+threshold_p99                           0    0.0111038   0.245805
+hits                                   95           95      2,577
+misses                              7,925        7,925      5,443
+false_alarms                        7,555        7,555      5,073
+POD_recall                      0.0118454    0.0118454   0.321322
+FAR_false_alarm_ratio            0.987582     0.987582   0.663137
+precision                       0.0124183    0.0124183   0.336863
+CSI_critical_success           0.00609952   0.00609952   0.196823
+F1                              0.0121251    0.0121251   0.328909
+
+=== storm - predicted vs observed, test period (585,374 county-days, 2246 real onsets) ===
+                              always_zero   base_rate     xgboost
+storm: predicted vs observed                                     
+n_rows                            585,374     585,374     585,374
+observed_events                     2,246       2,246       2,246
+observed_rate                  0.00383686  0.00383686  0.00383686
+predicted_mean                          0  0.00230375  0.00240244
+bias_pred_minus_obs           -0.00383686 -0.00153311 -0.00143442
+predicted_sd                            0 4.33681e-19  0.00498537
+observed_sd                     0.0618235   0.0618235   0.0618235
+MAE                            0.00383686  0.00612294  0.00603856
+RMSE                            0.0619424   0.0618425   0.0605536
+max_abs_error                           1    0.997696     0.99849
+brier                          0.00383686  0.00382449  0.00366674
+brier_skill_vs_baserate       -0.00385164 -0.00061495   0.0406575
+log_loss                         0.106016   0.0255997   0.0199099
+calibration_error_ECE          0.00383686  0.00270936  0.00328944
+average_precision              0.00383686  0.00383686    0.155697
+lift_over_rate                          1           1     40.5792
+threshold_p99                           0  0.00230375   0.0153891
+hits                                   33          33         828
+misses                              2,213       2,213       1,418
+false_alarms                        5,821       5,821       5,026
+POD_recall                      0.0146928   0.0146928    0.368655
+FAR_false_alarm_ratio            0.994363    0.994363    0.858558
+precision                      0.00563717  0.00563717    0.141442
+CSI_critical_success           0.00409074  0.00409074    0.113861
+F1                             0.00814815  0.00814815    0.204444
+
+wrote /home/runner/climate-risk-gulf/artifacts/runs/20261106T012030Z-run/results/results_run.json
+plots in /home/runner/climate-risk-gulf/artifacts/runs/20261106T012030Z-run/plots
+  compare_run.png
+  reliability_run.png
+  split_run.png
+  xgb_eval_run.png
+  xgb_training_run.png
+=== xgboost flood lead 1 day ===
+  best_iteration=279  263.5s
+  TEST  AP=0.17179  lift=46.1x  vs_best=1.90x  (2,850 pos / 765,020 rows)
+=== xgboost flood lead 2 day ===
+  best_iteration=264  235.8s
+  TEST  AP=0.12669  lift=34.1x  vs_best=1.17x  (2,839 pos / 765,020 rows)
+=== xgboost flood lead 3 day ===
+  best_iteration=39  77.8s
+  TEST  AP=0.07490  lift=20.2x  vs_best=1.41x  (2,836 pos / 765,020 rows)
+=== xgboost storm lead 1 day ===
+  best_iteration=45  78.0s
+  TEST  AP=0.09879  lift=77.2x  vs_best=2.40x  (749 pos / 585,374 rows)
+=== xgboost storm lead 2 day ===
+  best_iteration=18  56.3s
+  TEST  AP=0.07207  lift=56.3x  vs_best=1.57x  (749 pos / 585,374 rows)
+=== xgboost storm lead 3 day ===
+  best_iteration=110  125.2s
+  TEST  AP=0.03716  lift=29.0x  vs_best=2.21x  (749 pos / 585,374 rows)
+
+=== skill vs lead time (XGBoost, test period) ===
+hazard       lead  test_pos  prevalence  test_AP  lift          baseline  baseline_AP  vs_baseline
+ flood 1-3 pooled      8020    0.010483  0.26136  24.9 single_ratio_fwd3      0.19892         1.31
+ flood     +1 day      2850    0.003725  0.17179  46.1 single_ratio_fwd3      0.09035         1.90
+ flood     +2 day      2839    0.003711  0.12669  34.1 single_ratio_fwd3      0.10823         1.17
+ flood     +3 day      2836    0.003707  0.07490  20.2 single_ratio_fwd3      0.05325         1.41
+ storm 1-3 pooled      2246    0.003837  0.15570  40.6  single_prcp_fwd3      0.09541         1.63
+ storm     +1 day       749    0.001280  0.09879  77.2  single_prcp_fwd3      0.04109         2.40
+ storm     +2 day       749    0.001280  0.07207  56.3  single_prcp_fwd3      0.04584         1.57
+ storm     +3 day       749    0.001280  0.03716  29.0   single_log_fwd3      0.01683         2.21
+
+wrote /home/runner/climate-risk-gulf/artifacts/runs/20261106T012030Z-run/results/leads_run.csv
+wrote /home/runner/climate-risk-gulf/artifacts/runs/20261106T012030Z-run/plots/lead_run.png
+TFT lead sweep skipped (CRISK_SKIP_TFT=1 (TFT not attempted))
+
+=== run sealed: /home/runner/climate-risk-gulf/artifacts/runs/20261106T012030Z-run ===
+wall 1171.4s   24 files   git fe68bcc9 (dirty)
+cold start: reproducible from this directory and the panel hash alone
+  console.log
+  manifest.json
+  models/xgb_flood_l1_run.json
+  models/xgb_flood_l2_run.json
+  models/xgb_flood_l3_run.json
+  models/xgb_flood_run.json
+  models/xgb_storm_l1_run.json
+  models/xgb_storm_l2_run.json
+  models/xgb_storm_l3_run.json
+  models/xgb_storm_run.json
+  plots/compare_run.png
+  plots/lead_run.png
+  plots/reliability_run.png
+  plots/split_run.png
+  plots/xgb_eval_run.png
+  plots/xgb_training_run.png
+  results/deviation_flood_run.csv
+  results/deviation_storm_run.csv
+  results/leads_run.csv
+  results/leads_run.json
+  results/params_run.json
+  results/results_run.json
+  results/summary_run.csv
+  results/xgb_run.json

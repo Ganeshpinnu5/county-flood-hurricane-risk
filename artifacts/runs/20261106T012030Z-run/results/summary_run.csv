@@ -1,0 +1,5 @@
+hazard,model,test_AP,lift,vs_baseline,verdict
+flood,baseline: single_ratio_fwd3,0.19892,,1.0,reference
+flood,xgboost,0.26136,24.9,1.31,keep
+storm,baseline: single_prcp_fwd3,0.09541,,1.0,reference
+storm,xgboost,0.1557,40.6,1.63,keep

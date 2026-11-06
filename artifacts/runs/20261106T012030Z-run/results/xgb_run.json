@@ -1,0 +1,148 @@
+{
+  "flood": {
+    "model": "xgboost_monotone",
+    "val": {
+      "ap": 0.32359662372958264,
+      "prevalence": 0.011530924135261337,
+      "lift": 28.063372886135866
+    },
+    "test": {
+      "ap": 0.26135976402496275,
+      "prevalence": 0.010483386055266528,
+      "lift": 24.93085370004701
+    },
+    "best_baseline": "single_ratio_fwd3",
+    "best_baseline_ap": 0.19891779306325846,
+    "vs_best_baseline": 1.3139084241792633,
+    "best_iteration": 282,
+    "n_train_pos": 20740,
+    "n_test_pos": 8020,
+    "baselines": {
+      "constant_prevalence": 0.010483386055266528,
+      "single_ratio_fwd3": 0.19891779306325846,
+      "single_prcp_fwd3": 0.1913934815378262,
+      "single_prcp_fwd3_max": 0.1700035155080213,
+      "single_prcp_prev30": 0.01879320655566971,
+      "single_ratio_prev3": 0.01927145979925065,
+      "single_log_fwd3": 0.19135168509852923,
+      "single_pop_density": 0.021544576756727933,
+      "month_climatology": 0.016980269406809786
+    },
+    "top_features": [
+      [
+        "ratio_fwd3",
+        0.70804
+      ],
+      [
+        "log_fwd3",
+        0.08464
+      ],
+      [
+        "lon",
+        0.02074
+      ],
+      [
+        "prcp_fwd3",
+        0.01909
+      ],
+      [
+        "month_cos",
+        0.01782
+      ],
+      [
+        "pop_density",
+        0.01545
+      ],
+      [
+        "ratio_prev30",
+        0.01522
+      ],
+      [
+        "prcp_fwd3_max",
+        0.01319
+      ],
+      [
+        "lat",
+        0.01255
+      ],
+      [
+        "prcp_prev7",
+        0.00952
+      ]
+    ],
+    "beats_baseline": true
+  },
+  "storm": {
+    "model": "xgboost_monotone",
+    "val": {
+      "ap": 0.0923187346794553,
+      "prevalence": 0.002579094655515859,
+      "lift": 35.795016085204566
+    },
+    "test": {
+      "ap": 0.1556970051712233,
+      "prevalence": 0.003836863270319488,
+      "lift": 40.57924252230618
+    },
+    "best_baseline": "single_prcp_fwd3",
+    "best_baseline_ap": 0.09540648923871575,
+    "vs_best_baseline": 1.6319330730392476,
+    "best_iteration": 8,
+    "n_train_pos": 4303,
+    "n_test_pos": 2246,
+    "baselines": {
+      "constant_prevalence": 0.003836863270319488,
+      "single_ratio_fwd3": 0.06619178409301556,
+      "single_prcp_fwd3": 0.09540648923871575,
+      "single_prcp_fwd3_max": 0.09126996265226966,
+      "single_prcp_prev30": 0.006530082829442653,
+      "single_ratio_prev3": 0.004632146471530178,
+      "single_log_fwd3": 0.09536823869122503,
+      "single_pop_density": 0.006269143970418728,
+      "month_climatology": 0.00995191701727246
+    },
+    "top_features": [
+      [
+        "log_fwd3",
+        0.38163
+      ],
+      [
+        "prcp_fwd3",
+        0.17157
+      ],
+      [
+        "tmin",
+        0.11636
+      ],
+      [
+        "prcp_fwd3_max",
+        0.08419
+      ],
+      [
+        "month_sin",
+        0.0569
+      ],
+      [
+        "hurricane_season",
+        0.04387
+      ],
+      [
+        "month_cos",
+        0.02711
+      ],
+      [
+        "lon",
+        0.02299
+      ],
+      [
+        "ratio_fwd3",
+        0.01692
+      ],
+      [
+        "lat",
+        0.01615
+      ]
+    ],
+    "beats_baseline": true
+  }
+}

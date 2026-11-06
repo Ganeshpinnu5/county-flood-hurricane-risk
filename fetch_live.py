@@ -23,6 +23,15 @@ from v2_models import FEATS, LEADS, load_lead_scorers, load_scorers, provenance
 API = "https://api.open-meteo.com/v1/forecast"
 PAST = 92
 FWD = 4
+
+# Each scored day needs rain for the three days after it, so the last scored
+# day needs forecast out to FWD + HORIZON. Requesting only FWD truncates the
+# forward window of every day but the first: with 1 mm falling daily, the four
+# days returned prcp_fwd3 of 3, 2, 1 and 0 mm instead of 3, 3, 3, 3. The
+# feature is one of the model's strongest, so the error pushed later leads
+# toward "calm" -- the one direction a hazard dashboard must not fail in.
+HORIZON = 3
+REQ_FWD = FWD + HORIZON
 STATIC = ["lat", "lon", "n_stations", "AREA_SQMI", "E_TOTPOP", "RPL_THEME1",
           "RPL_THEME4", "RPL_THEMES", "pop_density", "p95_prev3", "p95_fwd3",
           "mean_prev30"]
@@ -122,7 +131,7 @@ def fetch(row):
                              "wind_speed_10m_max,wind_gusts_10m_max",
                     "timezone": "America/Chicago",
                     "past_days": PAST,
-                    "forecast_days": FWD,
+                    "forecast_days": REQ_FWD,
                 },
                 timeout=30,
             )
@@ -143,7 +152,11 @@ def fetch(row):
 def build_rows(fips, daily, static, feats):
     """One feature row per forecast day for this county."""
     t = pd.Series(pd.to_datetime(daily["time"]))
-    prcp = pd.Series(daily["precipitation_sum"], dtype="float64").fillna(0.0)
+    # Kept unfilled so a gap in the forward window is detectable. Zero-filling
+    # it first would turn "the API returned nothing for Friday" into "no rain
+    # fell on Friday", which is the same number with the opposite meaning.
+    prcp_raw = pd.Series(daily["precipitation_sum"], dtype="float64")
+    prcp = prcp_raw.fillna(0.0)
     tmax = pd.Series(daily["temperature_2m_max"], dtype="float64")
     tmin = pd.Series(daily["temperature_2m_min"], dtype="float64")
 
@@ -152,10 +165,15 @@ def build_rows(fips, daily, static, feats):
     out = []
     for k in range(FWD):
         i = i0 + k
-        if i >= len(t):
+        # A day whose forward window runs off the end of the response is
+        # dropped, not scored on a short sum: the model has no way to tell a
+        # genuinely dry three days from three days it was never given.
+        if i + HORIZON >= len(t):
             break
         past = prcp.iloc[:i + 1]
-        fwd = prcp.iloc[i + 1:i + 4]
+        fwd = prcp_raw.iloc[i + 1:i + 1 + HORIZON]
+        if fwd.isna().any():
+            break
 
         f = {
             "prcp": float(prcp.iloc[i]),
@@ -165,9 +183,9 @@ def build_rows(fips, daily, static, feats):
         }
         for w in (3, 7, 14, 30, 60, 90):
             f[f"prcp_prev{w}"] = float(past.iloc[-w:].sum())
-        f["prcp_fwd1"] = float(prcp.iloc[i + 1]) if i + 1 < len(prcp) else 0.0
+        f["prcp_fwd1"] = float(fwd.iloc[0])
         f["prcp_fwd3"] = float(fwd.sum())
-        f["prcp_fwd3_max"] = float(fwd.max()) if len(fwd) else 0.0
+        f["prcp_fwd3_max"] = float(fwd.max())
 
         day = t.iloc[i]
         f["month_sin"] = float(np.sin(2 * np.pi * day.month / 12))

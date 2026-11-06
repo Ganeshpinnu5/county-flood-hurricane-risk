@@ -25,7 +25,14 @@ import xgboost as xgb
 
 # The run this dashboard reports. Pinned, not globbed: picking "the newest run"
 # would let a smoke test silently become the published model.
-RUN_ID = os.environ.get("CRISK_RUN_ID", "20261104T015759Z-run")
+#
+# 20261104T015759Z-run is kept on disk but is no longer scored from: its pooled
+# y_flood/y_storm came from the label window this run corrects, so roughly two
+# thirds of its positives were days the event had already begun. This run holds
+# XGBoost only -- the two pooled TFTs still need a GPU rerun against the new
+# panel, so export_v2.py and make_report.py will fail loudly here until that
+# lands rather than mixing architectures across two label definitions.
+RUN_ID = os.environ.get("CRISK_RUN_ID", "20261106T012030Z-run")
 RUN_DIR = pathlib.Path(
     os.environ.get("CRISK_RUN_DIR", f"artifacts/runs/{RUN_ID}")
 )

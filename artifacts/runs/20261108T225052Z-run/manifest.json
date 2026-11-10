@@ -1,0 +1,302 @@
+{
+  "run_id": "20261108T225052Z-run",
+  "tag": "run",
+  "smoke": false,
+  "started_utc": "2026-11-08T22:50:52+00:00",
+  "env": "colab",
+  "host": "1d35c2468ee1",
+  "root": "crisk",
+  "git": {
+    "commit": "",
+    "branch": "",
+    "dirty": false
+  },
+  "versions": {
+    "python": "3.13.16",
+    "numpy": "2.4.6",
+    "pandas": "2.2.3",
+    "xgboost": "3.4.1",
+    "torch": "2.14.1+cu130",
+    "cuda": "NVIDIA RTX PRO 6000 Blackwell Server Edition"
+  },
+  "tft_skipped": null,
+  "params": {
+    "tag": "run",
+    "smoke": false,
+    "seed": 0,
+    "hazards": [
+      "flood",
+      "storm"
+    ],
+    "horizon_days": 3,
+    "leads": [
+      1,
+      2,
+      3
+    ],
+    "years": {
+      "train": [
+        2000,
+        2014
+      ],
+      "val": [
+        2015,
+        2019
+      ],
+      "test": [
+        2020,
+        2026
+      ]
+    },
+    "embargo_days": 3,
+    "label_end": {
+      "storm": 2024
+    },
+    "counties": 0,
+    "warm_start": true,
+    "xgb": {
+      "rounds": 2000,
+      "early": 50,
+      "lr": 0.05,
+      "max_depth": 6,
+      "min_child_weight": 50,
+      "subsample": 0.9,
+      "colsample_bytree": 0.9,
+      "reg_lambda": 5.0
+    },
+    "tft": {
+      "encoder_days": 30,
+      "hidden": 32,
+      "heads": 4,
+      "dropout": 0.2,
+      "hidden_continuous": 16,
+      "lr": 0.01,
+      "epochs": 30,
+      "batch": 512,
+      "early": 5,
+      "pos_weight": 50.0,
+      "limit_train_batches": 0.25,
+      "workers": 4,
+      "limit_val_batches": 1.0
+    }
+  },
+  "panel": {
+    "path": "artifacts/daily_panel.parquet",
+    "bytes": 128709061,
+    "mtime_utc": "2026-11-07T20:20:26+00:00",
+    "sha256": "b7455bfdbfeef7e64def525657302b01e50e3c83fef405a256f417219985ba92",
+    "rows_as_read": 3252826,
+    "counties_as_read": 356,
+    "years_as_read": [
+      2000,
+      2026
+    ],
+    "label_columns": [
+      "y_fema_flood",
+      "y_fema_storm",
+      "y_flood",
+      "y_storm",
+      "y_storm50",
+      "y_storm64"
+    ],
+    "onset_columns": [
+      "fema_flood_onset",
+      "fema_storm_onset",
+      "flood_onset",
+      "storm50_onset",
+      "storm64_onset",
+      "storm_onset"
+    ]
+  },
+  "splits": [
+    {
+      "split": "train",
+      "years": "2000-2014",
+      "rows": 1866781,
+      "counties": 356,
+      "flood_pos": 20734,
+      "flood_rate%": 1.1107,
+      "storm_pos": 4303,
+      "storm_rate%": 0.2305
+    },
+    {
+      "split": "val",
+      "years": "2015-2019",
+      "rows": 618985,
+      "counties": 354,
+      "flood_pos": 7129,
+      "flood_rate%": 1.1517,
+      "storm_pos": 1599,
+      "storm_rate%": 0.2583
+    },
+    {
+      "split": "test",
+      "years": "2020-2026",
+      "rows": 764238,
+      "counties": 356,
+      "flood_pos": 8020,
+      "flood_rate%": 1.0494,
+      "storm_pos": 2246,
+      "storm_rate%": 0.3837
+    }
+  ],
+  "lead_targets": [
+    "y_flood_l1",
+    "y_flood_l2",
+    "y_flood_l3",
+    "y_storm_l1",
+    "y_storm_l2",
+    "y_storm_l3"
+  ],
+  "finished_utc": "2026-11-09T12:36:27+00:00",
+  "wall_seconds": 49535.3,
+  "headline": {
+    "xgboost": {
+      "flood": 0.2619,
+      "storm": 0.53294
+    },
+    "tft": {
+      "flood": 0.21066,
+      "storm": 0.40705
+    },
+    "xgb_leads": {
+      "flood_l1": 0.17395,
+      "flood_l2": 0.12595,
+      "flood_l3": 0.07337,
+      "storm_l1": 0.4942,
+      "storm_l2": 0.38309,
+      "storm_l3": 0.171
+    },
+    "tft_leads": {
+      "flood_l1": 0.11904,
+      "flood_l2": 0.11242,
+      "flood_l3": 0.08383,
+      "storm_l1": 0.29892,
+      "storm_l2": 0.2246,
+      "storm_l3": 0.07939
+    }
+  },
+  "models": {
+    "xgb_flood_run.json": {
+      "sha256": "6b617680f32fb4975eef181518821eb05acd18749ca18b4036a624caa72255f1",
+      "bytes": 1053648
+    },
+    "xgb_storm_run.json": {
+      "sha256": "0b47a86248b9c0bd4bbe9dcebf1047558e94ecc3b90b3b32cb38c9b17d07bb87",
+      "bytes": 168147
+    },
+    "xgb_flood_l1_run.json": {
+      "sha256": "4326ed7a78a2347b897d650f7a19137fcbf02c15c1b1875c7083fb9fce9144dd",
+      "bytes": 633174
+    },
+    "xgb_flood_l2_run.json": {
+      "sha256": "8440a2f34c31d5207eeb441f54590e8efe8c37f23eca24466dcce21be7bf1565",
+      "bytes": 323916
+    },
+    "xgb_flood_l3_run.json": {
+      "sha256": "2bebc2bb07d0a2510535d45da8e9c1ed2337b6fb63e1684fe76dd77565cedd50",
+      "bytes": 320248
+    },
+    "xgb_storm_l1_run.json": {
+      "sha256": "36a7252fa453af1c56bc56704f5a852b230baf35e786c6ae08b8b163bea15e28",
+      "bytes": 118898
+    },
+    "xgb_storm_l2_run.json": {
+      "sha256": "072e400be8fbf915f151bc6a7532e634d1faeb05963224640f63ceebdd8fd67d",
+      "bytes": 447778
+    },
+    "xgb_storm_l3_run.json": {
+      "sha256": "93ee940989cb2362f4572cf43e18ccd6201a3904d04ea4667b10d55f792974d4",
+      "bytes": 118656
+    },
+    "tft_flood_run.ckpt": {
+      "sha256": "a182062f1dd79c9bbf5d29ed995313e42976abcc203dfb0b300df048f74f8470",
+      "bytes": 4351724
+    },
+    "tft_storm_run.ckpt": {
+      "sha256": "40630b90ff33a1c51ee75518e4192b5efd5f05898e8f6ce5a9cfce45cde9ae15",
+      "bytes": 4351724
+    },
+    "tft_flood_l1_run.ckpt": {
+      "sha256": "5bda21bc7f402bb1d876ce646e8420ce62e71c558b9c30911332e6ab1d90ac14",
+      "bytes": 4351724
+    },
+    "tft_flood_l2_run.ckpt": {
+      "sha256": "29a157cee5111a949fb487f97be2b5e67b4610fa58d3078a401b6a4f3f371cc9",
+      "bytes": 4351724
+    },
+    "tft_flood_l3_run.ckpt": {
+      "sha256": "b168348ea9e501a4b3700328593c1c3488a07236fddb787b8482cbbb2fd8c38b",
+      "bytes": 4351724
+    },
+    "tft_storm_l1_run.ckpt": {
+      "sha256": "2a2c6221b4b111cbea612968ae5d0f6d64a6383f4c24a9b89ba4b3aa576977ab",
+      "bytes": 4351724
+    },
+    "tft_storm_l2_run.ckpt": {
+      "sha256": "1610609e3a3672faecf4afe1333ee21a37a878e14236c4c80a939674cb10f54e",
+      "bytes": 4351724
+    },
+    "tft_storm_l3_run.ckpt": {
+      "sha256": "6cc24d0f5c62ffa9a70ed9ef234e0eeb4444918c8ab41a6c3bb5946046237256",
+      "bytes": 4351724
+    }
+  },
+  "inventory": [
+    "console.log",
+    "manifest.json",
+    "models/tft_flood_l1_run.ckpt",
+    "models/tft_flood_l2_run.ckpt",
+    "models/tft_flood_l3_run.ckpt",
+    "models/tft_flood_run.ckpt",
+    "models/tft_storm_l1_run.ckpt",
+    "models/tft_storm_l2_run.ckpt",
+    "models/tft_storm_l3_run.ckpt",
+    "models/tft_storm_run.ckpt",
+    "models/xgb_flood_l1_run.json",
+    "models/xgb_flood_l2_run.json",
+    "models/xgb_flood_l3_run.json",
+    "models/xgb_flood_run.json",
+    "models/xgb_storm_l1_run.json",
+    "models/xgb_storm_l2_run.json",
+    "models/xgb_storm_l3_run.json",
+    "models/xgb_storm_run.json",
+    "plots/compare_run.png",
+    "plots/lead_both_run.png",
+    "plots/lead_run.png",
+    "plots/reliability_run.png",
+    "plots/split_run.png",
+    "plots/tft_eval_run.png",
+    "plots/xgb_eval_run.png",
+    "plots/xgb_training_run.png",
+    "results/deviation_flood_run.csv",
+    "results/deviation_storm_run.csv",
+    "results/leads_both_run.csv",
+    "results/leads_run.csv",
+    "results/leads_run.json",
+    "results/params_run.json",
+    "results/results_run.json",
+    "results/summary_run.csv",
+    "results/tft_leads_run.json",
+    "results/tft_run.json",
+    "results/xgb_run.json",
+    "tft_logs/flood/hparams.yaml",
+    "tft_logs/flood/metrics.csv",
+    "tft_logs/flood_l1/hparams.yaml",
+    "tft_logs/flood_l1/metrics.csv",
+    "tft_logs/flood_l2/hparams.yaml",
+    "tft_logs/flood_l2/metrics.csv",
+    "tft_logs/flood_l3/hparams.yaml",
+    "tft_logs/flood_l3/metrics.csv",
+    "tft_logs/storm/hparams.yaml",
+    "tft_logs/storm/metrics.csv",
+    "tft_logs/storm_l1/hparams.yaml",
+    "tft_logs/storm_l1/metrics.csv",
+    "tft_logs/storm_l2/hparams.yaml",
+    "tft_logs/storm_l2/metrics.csv",
+    "tft_logs/storm_l3/hparams.yaml",
+    "tft_logs/storm_l3/metrics.csv"
+  ],
+  "warm_parents": {},
+  "self_contained": true
+}

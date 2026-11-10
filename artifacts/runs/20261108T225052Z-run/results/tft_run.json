@@ -1,0 +1,60 @@
+{
+  "flood": {
+    "model": "temporal_fusion_transformer",
+    "val": {
+      "ap": 0.26147110652802397,
+      "prevalence": 0.011537357323942976,
+      "lift": 22.662998049423706
+    },
+    "test": {
+      "ap": 0.21066466677591547,
+      "prevalence": 0.010536668160385777,
+      "lift": 19.993480250990693
+    },
+    "best_baseline": "single_ratio_fwd3",
+    "best_baseline_ap": 0.19892958310368652,
+    "epochs_run": 10,
+    "best_val_loss": 0.5692549347877502,
+    "n_test_pos": 7971,
+    "n_test_windows": 756501,
+    "calibration": {
+      "method": "isotonic_on_val",
+      "pos_weight": 50.0,
+      "observed_rate": 0.010536668160385777,
+      "pred_mean_raw": 0.15698516368865967,
+      "pred_mean_calibrated": 0.009793171659111977,
+      "ap_raw": 0.21718371433433953
+    },
+    "vs_best_baseline": 1.0589911439472146,
+    "beats_baseline": true
+  },
+  "storm": {
+    "model": "temporal_fusion_transformer",
+    "val": {
+      "ap": 0.36849845179132285,
+      "prevalence": 0.00257575192329839,
+      "lift": 143.06441876570187
+    },
+    "test": {
+      "ap": 0.40705086704702953,
+      "prevalence": 0.003837635063865636,
+      "lift": 106.0681540253097
+    },
+    "best_baseline": "single_prcp_fwd3",
+    "best_baseline_ap": 0.09540648923871575,
+    "epochs_run": 11,
+    "best_val_loss": 0.19853098690509796,
+    "n_test_pos": 2223,
+    "n_test_windows": 579263,
+    "calibration": {
+      "method": "isotonic_on_val",
+      "pos_weight": 50.0,
+      "observed_rate": 0.003837635063865636,
+      "pred_mean_raw": 0.020306576043367386,
+      "pred_mean_calibrated": 0.003713734447956085,
+      "ap_raw": 0.41679729841364616
+    },
+    "vs_best_baseline": 4.26649036449241,
+    "beats_baseline": true
+  }
+}

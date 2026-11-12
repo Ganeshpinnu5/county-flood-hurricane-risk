@@ -3,10 +3,10 @@
 Turns public county/state GeoJSON into pre-projected SVG path strings so the
 browser draws real boundaries instead of dots, and needs no mapping library.
 
-Scope is the lower 48. The models only cover the Gulf, but the map covers the
-country so the validated region is visible as a region rather than as the whole
-world — and so weather and official warnings, which work anywhere, can be
-queried for any county the user clicks.
+Scope is the five Gulf states the models were built and validated on: AL, FL,
+LA, MS, TX. The map covered the lower 48 for a while; that national scope was
+dropped on the professor's direction, so the map now shows exactly the region
+the numbers describe.
 
 Projection is Albers equal-area conic on the standard CONUS parallels, which
 keeps county areas comparable by eye. Everything is projected here, in Python,
@@ -89,8 +89,8 @@ def rings(geom):
 counties = load("counties")
 states = load("states")
 
-conus = [f for f in counties["features"] if f["id"][:2] not in OFF_MAP]
-print(f"{len(conus)} counties in the lower 48")
+conus = [f for f in counties["features"] if f["id"][:2] in GULF]
+print(f"{len(conus)} counties in the five Gulf states")
 
 pts = [albers(x, y) for f in conus for r in rings(f["geometry"]) for x, y in r]
 xs, ys = [p[0] for p in pts], [p[1] for p in pts]
@@ -188,29 +188,23 @@ for f in conus:
     ]
 
 # State outlines on top of the counties, so states read as states.
-skip = {"Alaska", "Hawaii", "Puerto Rico"}
-state_paths, gulf_state_paths = [], []
+gulf_state_paths = []
 gulf_names = {"Alabama", "Florida", "Louisiana", "Mississippi", "Texas"}
 for f in states["features"]:
-    nm = f["properties"]["name"]
-    if nm in skip:
+    if f["properties"]["name"] not in gulf_names:
         continue
     d = path(f["geometry"])
-    if not d:
-        continue
-    (gulf_state_paths if nm in gulf_names else state_paths).append(d)
+    if d:
+        gulf_state_paths.append(d)
 
 payload = {
     "width": W, "height": H,
     "counties": county_paths,
     "names": names,
-    "states": state_paths,
     "gulf_states": gulf_state_paths,
 }
 OUT.write_text(json.dumps(payload, separators=(",", ":")))
 
 print(f"wrote {OUT}  ({OUT.stat().st_size / 1024:.0f} KB)")
 print(f"  {len(county_paths)} county shapes, "
-      f"{len(state_paths) + len(gulf_state_paths)} state outlines")
-print(f"  counties in the modelled Gulf states: "
-      f"{sum(1 for k in county_paths if k[:2] in GULF)}")
+      f"{len(gulf_state_paths)} state outlines")

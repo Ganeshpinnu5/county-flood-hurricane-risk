@@ -38,6 +38,12 @@ RECENT_DAYS = 60
 PER_COUNTY = {"flood": 6, "storm": 4}   # events listed per county, per hazard
 BAND_SAMPLE = 150_000
 
+# Onset dates further apart than this start a new weather episode. Seven days
+# is past the lifetime of a rain system crossing the Gulf and past the time a
+# single cyclone spends over land, so clusters below it are one event seen from
+# several counties.
+EPISODE_GAP_DAYS = 7
+
 
 def fips5(s):
     """Both event tables key on county, one as int and one already padded."""
@@ -114,12 +120,58 @@ def county_meta(panel, geo):
     return out
 
 
+def live_run_id():
+    """The run that scored the live page, or None if it has not been built.
+
+    meta.json and live.json are written by different programs, so nothing
+    structural stops one from describing a model the other is not running. That
+    is exactly what happened once: live.json was repointed at a corrected run
+    while meta.json kept reporting the superseded one's accuracy, so the page
+    published a model card for a model it had stopped using. Checked here, at
+    the start, because the alternative is a visitor finding it.
+    """
+    p = DOCS / "live.json"
+    if not p.exists():
+        return None
+    return json.loads(p.read_text()).get("run_id")
+
+
+def live_n_counties():
+    """How many counties the live page actually scores.
+
+    The gap between this and the fitted count is the project's largest caveat,
+    so the model card states both. Read from live.json rather than assumed,
+    because it is the file that decides how many counties get a probability.
+    """
+    p = DOCS / "live.json"
+    if not p.exists():
+        return None
+    return json.loads(p.read_text()).get("n_counties")
+
+
 def main():
     prm = v2_models.results("params_run.json")
     xgb_res = v2_models.results("xgb_run.json")
-    tft_res = v2_models.results("tft_run.json")
     lead_res = v2_models.results("leads_run.json")
-    tft_lead_res = v2_models.results("tft_leads_run.json")
+
+    # Optional: a run that trained no transformer publishes no transformer
+    # numbers. Borrowing them from a run with a different label definition
+    # would turn the architecture comparison into a label comparison.
+    tft_res = v2_models.results_opt("tft_run.json")
+    tft_lead_res = v2_models.results_opt("tft_leads_run.json")
+    has_tft = tft_res is not None and tft_lead_res is not None
+    if not has_tft:
+        print("no transformer results in this run -- "
+              "every TFT figure will be marked withdrawn")
+
+    here, live = v2_models.provenance()["run_id"], live_run_id()
+    if live is not None and live != here:
+        raise SystemExit(
+            f"run mismatch: exporting meta.json from {here}, but "
+            f"docs/data/live.json was scored by {live}.\n"
+            f"run `python fetch_live.py` first so both describe one model, "
+            f"or set CRISK_RUN_DIR to the run live.json used."
+        )
 
     pooled = v2_models.load_scorers()
     per_lead = v2_models.load_lead_scorers()
@@ -237,6 +289,33 @@ def main():
         "events_listed": n_listed,
     }
 
+    # Effective sample size, which is nothing like the row count. Rain and
+    # tropical cyclones are spatially correlated, so every county a single
+    # system crosses is close to one observation rather than many. AP computed
+    # over 765,020 county-days therefore reads as a large-sample figure while
+    # resting, on hurricanes, on about 23 storms. Published because a reader
+    # otherwise has no way to see it, and because any confidence interval would
+    # have to resample these blocks rather than rows.
+    episodes = {}
+    for haz in HAZARDS:
+        t = panel[panel["year"].between(*prm["years"]["test"])]
+        cap = prm.get("label_end", {}).get(haz)
+        if cap is not None:
+            t = t[t["year"] <= int(cap)]
+        onset = t[t[f"{haz}_onset"] == 1]
+        dates = np.sort(onset["DATE"].unique())
+        gaps = np.diff(dates) / np.timedelta64(1, "D") if len(dates) else []
+        episodes[haz] = {
+            "onset_county_days": int(len(onset)),
+            "distinct_dates": int(len(dates)),
+            "episodes": int(1 + (np.asarray(gaps) > EPISODE_GAP_DAYS).sum())
+                        if len(dates) else 0,
+            "gap_days": EPISODE_GAP_DAYS,
+        }
+        print(f"{haz}: {episodes[haz]['onset_county_days']:,} onset county-days"
+              f" = {episodes[haz]['distinct_dates']} dates"
+              f" = {episodes[haz]['episodes']} episodes")
+
     # --- risk by date ------------------------------------------------------
     sub["d"] = sub["DATE"].dt.strftime("%Y-%m-%d")
     cols = (["county_fips", "p_flood", "p_storm", "prcp_fwd3", "ratio_fwd3",
@@ -269,8 +348,164 @@ def main():
             bands[f"{haz}_l{k}"] = {q: float(np.quantile(s, v)) for q, v in qs}
 
     # --- metrics the dashboard reports -------------------------------------
+    def deviation(haz):
+        """The run's threshold-level scoring, keyed by metric name.
+
+        Average precision ranks and says nothing about what a user at a
+        threshold experiences, so the model card quotes Brier skill and
+        precision from here. Read out of the run's own CSV because a figure
+        typed into the page is a figure that will not be updated with the
+        next run.
+        """
+        p = v2_models.run_dir() / "results" / f"deviation_{haz}_run.csv"
+        d = pd.read_csv(p, index_col=0)
+        return d["xgboost"].to_dict()
+
+    def ablation():
+        """Forward-rain ablation, if `audit_fwd_ablation.py` has been run.
+
+        Optional because it refits two models and is not part of a training
+        run. When absent the model card drops the claim rather than carrying a
+        remembered number -- the same rule the transformer results follow.
+
+        Run-id checked on the same grounds as `uncertainty`: this file used to
+        be a bare list with no record of what it was measured against, so an
+        ablation from an older feature set would have been printed beside this
+        run's headline as though the two shared a test set.
+        """
+        p = ARTIFACTS / "audit_fwd_ablation.json"
+        if not p.exists():
+            return None
+        d = json.loads(p.read_text())
+        here = v2_models.provenance()["run_id"]
+        if not isinstance(d, dict) or d.get("run_id") != here:
+            print(f"  skipping audit_fwd_ablation.json: computed against "
+                  f"{d.get('run_id') if isinstance(d, dict) else 'an unstamped run'}"
+                  f", this export is {here}")
+            return None
+        rows = d["variants"]
+        out = {}
+        for haz in HAZARDS:
+            full = next((r for r in rows if r["hazard"] == haz
+                         and "NO" not in r["variant"]), None)
+            less = next((r for r in rows if r["hazard"] == haz
+                         and "NO" in r["variant"]), None)
+            if not (full and less):
+                return None
+            out[haz] = {"ap_all": full["test_ap"], "ap_no_fwd": less["test_ap"],
+                        "share_lost": 1 - less["test_ap"] / full["test_ap"]}
+        return out
+
+    def uncertainty():
+        """Episode-block CIs and seed spread, if `audit_uncertainty.py` has run.
+
+        Optional on the same terms as `ablation`. The run_id check matters more
+        here than elsewhere: an interval computed against one run's boosters
+        printed beside another run's point estimate would look like a tight
+        result when it is really two unrelated numbers.
+        """
+        p = ARTIFACTS / "audit_uncertainty.json"
+        if not p.exists():
+            return None
+        u = json.loads(p.read_text())
+        here = v2_models.provenance()["run_id"]
+        if u.get("run_id") != here:
+            print(f"  skipping audit_uncertainty.json: computed against "
+                  f"{u.get('run_id')}, this export is {here}")
+            return None
+        for hz in u["hazards"].values():
+            # Audits written before the field existed stored only the
+            # bootstrap mean of the ratio, which sits away from the point
+            # estimate. Derive the published ratio from the two APs rather
+            # than quoting a resampled mean as the result.
+            if hz.get("vs_baseline_point") is None and hz["baseline_ap"]:
+                hz["vs_baseline_point"] = hz["ap_rescored"] / hz["baseline_ap"]
+        return u
+
+    def patience():
+        """Early-stopping sensitivity, if `audit_patience.py` has run.
+
+        Carries the span of the whole sweep alongside the per-level means. The
+        span is the reportable quantity: it says how far the test figure moves
+        under a hyperparameter the validation set cannot pin down, which is a
+        different and larger uncertainty than the seed spread at one level.
+        """
+        p = ARTIFACTS / "audit_patience.json"
+        if not p.exists():
+            return None
+        d = json.loads(p.read_text())
+        here = v2_models.provenance()["run_id"]
+        if d.get("run_id") != here:
+            print(f"  skipping audit_patience.json: computed against "
+                  f"{d.get('run_id')}, this export is {here}")
+            return None
+        # The setting the published booster actually used, read from the run
+        # that produced it. Hardcoding it here would let the report keep
+        # naming 50 after a retrain moved it.
+        man = json.loads((v2_models.RUN_DIR / "manifest.json").read_text())
+        for hz in d["hazards"].values():
+            if not hz:
+                continue
+            means = [r["mean"] for r in hz.values()]
+            every = [a for r in hz.values() for a in r["ap"]]
+            iters = [i for r in hz.values() for i in r["best_iteration"]]
+            hz["_span"] = {
+                "n_fits": len(every),
+                "mean_lo": min(means), "mean_hi": max(means),
+                "ap_lo": min(every), "ap_hi": max(every),
+                "iter_lo": min(iters), "iter_hi": max(iters),
+                "published": man["params"]["xgb"]["early"],
+                "best_level": max(hz, key=lambda k: hz[k]["mean"])}
+        return d
+
+    def forecast_rain():
+        """Observed-vs-forecast forward rain, if `audit_forecast_rain.py` ran.
+
+        Optional and run_id-guarded like the audits above. Both arms are
+        loaded when both exist, because they cover different spans and
+        different forecast products: quoting whichever happened to run last
+        would make the window the result depends on invisible.
+        """
+        out = {}
+        for arm in ("gefs", "open-meteo"):
+            p = ARTIFACTS / f"audit_forecast_rain_{arm}.json"
+            if not p.exists():
+                continue
+            d = json.loads(p.read_text())
+            here = v2_models.provenance()["run_id"]
+            if d.get("run_id") != here:
+                print(f"  skipping {p.name}: computed against "
+                      f"{d.get('run_id')}, this export is {here}")
+                continue
+            for hz in d["hazards"].values():
+                # Which input won, stated once here rather than re-derived
+                # from the sign of a difference at each point of use. For
+                # hurricanes the forecast is the better input, so "retained"
+                # and "drop" do not describe this hazard and the card must not
+                # render them as though they did.
+                hz["forecast_is_better"] = hz["ap_forecast"] > hz["ap_observed"]
+            out[arm] = d
+        return out or None
+
+    def tft_block(haz):
+        if not has_tft:
+            return None
+        t = tft_res[haz]
+        return {"test_ap": t["test"]["ap"],
+                "lift_over_prevalence": t["test"]["lift"],
+                "vs_best_baseline": t["vs_best_baseline"],
+                "epochs_run": t["epochs_run"],
+                # Carried under the key the run recorded, not normalised to one
+                # name. A run selected on cross-entropy and a run selected on
+                # validation AP are not interchangeable, and the key is the only
+                # thing in this block that says which rule chose the epoch.
+                **{k: t[k] for k in ("best_val_ap", "best_val_loss")
+                   if k in t},
+                "n_test_windows": t["n_test_windows"],
+                "calibration": t["calibration"]["method"]}
+
     def model_block(haz):
-        x, t = xgb_res[haz], tft_res[haz]
+        x = xgb_res[haz]
         return {
             "model": "xgboost_monotone",
             "n_features": len(FEATS),
@@ -287,29 +522,29 @@ def main():
             "top_features": x["top_features"][:8],
             "baselines": dict(sorted(x["baselines"].items(),
                                      key=lambda kv: -kv[1])[:6]),
-            "tft": {"test_ap": t["test"]["ap"],
-                    "lift_over_prevalence": t["test"]["lift"],
-                    "vs_best_baseline": t["vs_best_baseline"],
-                    "epochs_run": t["epochs_run"],
-                    "best_val_loss": t["best_val_loss"],
-                    "n_test_windows": t["n_test_windows"],
-                    "calibration": t["calibration"]["method"]},
+            "deviation": deviation(haz),
+            "tft": tft_block(haz),
         }
 
-    leads_block = [
-        {"hazard": haz, "lead": k,
-         "prevalence": lead_res[f"{haz}_l{k}"]["test"]["prevalence"],
-         "baseline": lead_res[f"{haz}_l{k}"]["best_baseline"],
-         "baseline_ap": lead_res[f"{haz}_l{k}"]["best_baseline_ap"],
-         "xgb_ap": lead_res[f"{haz}_l{k}"]["test"]["ap"],
-         "xgb_vs_base": lead_res[f"{haz}_l{k}"]["vs_best_baseline"],
-         "xgb_lift": lead_res[f"{haz}_l{k}"]["test"]["lift"],
-         "tft_ap": tft_lead_res[f"{haz}_l{k}"]["test"]["ap"],
-         "tft_vs_base": tft_lead_res[f"{haz}_l{k}"]["vs_best_baseline"],
-         "tft_lift": tft_lead_res[f"{haz}_l{k}"]["test"]["lift"],
-         "n_test_pos": lead_res[f"{haz}_l{k}"]["n_test_pos"]}
-        for haz in HAZARDS for k in LEADS
-    ]
+    def lead_row(haz, k):
+        x, key = lead_res[f"{haz}_l{k}"], f"{haz}_l{k}"
+        row = {"hazard": haz, "lead": k,
+               "prevalence": x["test"]["prevalence"],
+               "baseline": x["best_baseline"],
+               "baseline_ap": x["best_baseline_ap"],
+               "xgb_ap": x["test"]["ap"],
+               "xgb_vs_base": x["vs_best_baseline"],
+               "xgb_lift": x["test"]["lift"],
+               "n_test_pos": x["n_test_pos"],
+               "tft_ap": None, "tft_vs_base": None, "tft_lift": None}
+        if has_tft:
+            t = tft_lead_res[key]
+            row |= {"tft_ap": t["test"]["ap"],
+                    "tft_vs_base": t["vs_best_baseline"],
+                    "tft_lift": t["test"]["lift"]}
+        return row
+
+    leads_block = [lead_row(haz, k) for haz in HAZARDS for k in LEADS]
 
     meta = county_meta(panel, geo)
     payload = {
@@ -330,9 +565,25 @@ def main():
         },
         "n_counties_modeled": sum(v[4] for v in meta.values()),
         "n_counties_mapped": len(meta),
+        "n_counties_scored": live_n_counties(),
         "n_events_listed": int(len(shown)),
         "n_events_total": int(len(events)),
         "coverage": coverage,
+        "episodes": episodes,
+        "fwd_rain_ablation": ablation(),
+        "uncertainty": uncertainty(),
+        "patience_sweep": patience(),
+        "forecast_rain": forecast_rain(),
+        "architectures": ["xgboost_monotone"] + (
+            ["temporal_fusion_transformer"] if has_tft else []),
+        "tft_status": {
+            "available": has_tft,
+            "note": None if has_tft else (
+                "Withdrawn. The only trained transformer used the superseded "
+                "label window, so comparing it against these boosters would "
+                "compare two label definitions rather than two architectures. "
+                "Pending a GPU rerun on this panel."),
+        },
         "flood": model_block("flood"),
         "storm": model_block("storm"),
         "lead_table": leads_block,

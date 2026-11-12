@@ -155,8 +155,11 @@ def fetch_chunk(rows):
     a failure of the whole chunk rather than guessed through: misaligning the
     zip would silently score every county on its neighbour's weather.
     """
+    # Six attempts, not four: a chunk is 50 counties, so one chunk giving up
+    # costs a tenth of the map and sits right at the publish floor. With 11
+    # requests total, the extra backoff is nearly free.
     err = None
-    for attempt in range(4):
+    for attempt in range(6):
         if attempt:
             time.sleep(1.5 * 2 ** (attempt - 1))
         _throttle()

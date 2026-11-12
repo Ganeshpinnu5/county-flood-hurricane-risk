@@ -19,10 +19,11 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    # 3,101 counties at the rate limit the fetcher holds itself to is about ten
-    # minutes; the margin is for Open-Meteo throttling the runner harder than it
-    # throttles a laptop.
-    timeout-minutes: 45
+    # 534 Gulf counties at the fetcher's own rate limit is a few minutes. The
+    # national-scope version of this job hit Open-Meteo's much harsher limits
+    # for GitHub's shared runner IPs and was cancelled at this timeout every
+    # day, which is what froze the published live.json.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

@@ -603,11 +603,11 @@ function liveCheck() {
   el("lc-refresh").addEventListener("click", () => loadAlerts(fips, true));
 }
 
-// --------------------------------------- national live scoreboard (NWS)
+// ------------------------------------------- live scoreboard (NWS, Gulf)
 
 /* The per-county panel above answers "does the model agree here". This answers
- * it across the whole country at once, which is the only form of the question
- * that can be checked in real time.
+ * it across the whole Gulf region at once, which is the only form of the
+ * question that can be checked in real time.
  *
  * Scored as precision-at-k, not as a hit rate against a band. The obvious
  * version -- count the counties the model puts above some band, see how many
@@ -653,6 +653,7 @@ async function loadScoreboard() {
   try {
     const q = new URLSearchParams({
       event: SB_EVENTS.join(","), status: "actual",
+      area: [...MODELLED_STATES].join(","),
     });
     const res = await fetch(`https://api.weather.gov/alerts/active?${q}`,
       { headers: { Accept: "application/geo+json" } });
@@ -744,8 +745,8 @@ function paintScoreboard() {
       return `<div class="sb-row">
         <span class="sb-h">${HAZ_LABEL[haz]}</span>
         <span class="sb-calm">No ${haz === "flood" ? "flood" : "tropical"}
-          product in force anywhere in the country, so there is nothing to
-          compare against right now.</span></div>`;
+          product in force anywhere in the five Gulf states, so there is
+          nothing to compare against right now.</span></div>`;
     }
     if (!s.k) {
       return `<div class="sb-row">
@@ -799,19 +800,13 @@ function card(day, w) {
   </div>`;
 }
 
+/* Always fetched live, never from the exported payload: the payload is only
+ * as fresh as the last scheduled run, and serving its copy here once left the
+ * detail panel showing days-old "weather" with no sign anything was wrong. */
 async function loadWeather(fips) {
   const c = county(fips);
   const box = el("d-forecast");
   const req = ++S.wxReq;
-
-  const cached = S.mode === "live" && S.live.weather[fips];
-  if (cached) {
-    const days = Object.keys(cached).sort();
-    box.innerHTML = days.map((d) => card(d, cached[d])).join("") +
-      `<p class="note">Open-Meteo forecast, pulled ${
-        hoursAgo(S.live.generated)} h ago — what the model was scored on.</p>`;
-    return;
-  }
 
   box.innerHTML = `<p class="quiet">Loading from Open-Meteo&hellip;</p>`;
   const start = S.date;
@@ -851,6 +846,11 @@ const hours = (s) => (s / 3600).toFixed(1);
 const leadRows = () => S.meta.lead_table;
 const leadOf = (haz, k) => leadRows().find((r) => r.hazard === haz && r.lead === k);
 
+// Whether this run trained a transformer at all. Read from the payload rather
+// than assumed, so the page shows the comparison only when the run it is
+// serving actually produced one.
+const hasTft = () => Boolean(S.meta.tft_status?.available);
+
 /** The lead-time sweep: one model per lead, each against its own baseline. */
 function leadCards() {
   const cards = [];
@@ -874,8 +874,12 @@ function leadCards() {
     `<div class="card hero"><div class="k">${k}</div><div class="v">${v}</div>
      <div class="n">${n}</div></div>`).join("");
 
+  const tft = hasTft();
+  for (const th of document.querySelectorAll("#mc-leads .tft-col")) {
+    th.hidden = !tft;
+  }
   el("mc-leads").querySelector("tbody").innerHTML = leadRows().map((r) => {
-    const win = r.xgb_ap >= r.tft_ap;
+    const win = tft && r.xgb_ap >= r.tft_ap;
     const bad = (x) => x < 1.0 ? "bad" : "";
     return `<tr>
       <td>${HAZ_LABEL[r.hazard]}</td>
@@ -885,8 +889,8 @@ function leadCards() {
         <span class="dim">(${r.baseline.replace("single_", "")})</span></td>
       <td class="num${win ? " good" : ""}">${r.xgb_ap.toFixed(4)}</td>
       <td class="num ${bad(r.xgb_vs_base)}">${r.xgb_vs_base.toFixed(2)}×</td>
-      <td class="num${win ? "" : " good"}">${r.tft_ap.toFixed(4)}</td>
-      <td class="num ${bad(r.tft_vs_base)}">${r.tft_vs_base.toFixed(2)}×</td>
+      ${tft ? `<td class="num${win ? "" : " good"}">${r.tft_ap.toFixed(4)}</td>
+      <td class="num ${bad(r.tft_vs_base)}">${r.tft_vs_base.toFixed(2)}×</td>` : ""}
     </tr>`;
   }).join("");
 
@@ -898,20 +902,21 @@ function leadCards() {
      Flood average precision runs ${f1.xgb_ap.toFixed(4)} →
      ${f2.xgb_ap.toFixed(4)} → ${f3.xgb_ap.toFixed(4)} across +1, +2 and +3
      days; hurricane runs ${s1.xgb_ap.toFixed(4)} → ${s2.xgb_ap.toFixed(4)} →
-     ${s3.xgb_ap.toFixed(4)}. The transformer is monotone on hurricanes but not
+     ${s3.xgb_ap.toFixed(4)}.` + (tft
+      ? ` The transformer is monotone on hurricanes but not
      on floods, where its +2 fit (${f2.tft_ap.toFixed(4)}) lands above its +1
      fit (${f1.tft_ap.toFixed(4)}); that inversion is left visible rather than
-     smoothed. The ratio to baseline does not decay neatly, because the baseline
-     is losing signal at the same time — read average precision for forecast
-     quality and the ratio only for whether the complexity is earned.`;
+     smoothed.` : "") + ` The ratio to baseline does not decay neatly, because
+     the baseline is losing signal at the same time — read average precision for
+     forecast quality and the ratio only for whether the complexity is earned.`;
 
   el("lead-foot").innerHTML =
     `Base rate is the share of test county-days with onset on exactly that day.
      Every cell is average precision on ${S.meta.splits.test[0]}&ndash;${
-       S.meta.splits.test[1]}, unseen in training and selection. Green marks the
-     better architecture at that lead: XGBoost takes ${
-       leadRows().filter((r) => r.xgb_ap >= r.tft_ap).length} of
-     ${leadRows().length}.`;
+       S.meta.splits.test[1]}, unseen in training and selection.` + (tft
+      ? ` Green marks the better architecture at that lead: XGBoost takes ${
+        leadRows().filter((r) => r.xgb_ap >= r.tft_ap).length} of
+     ${leadRows().length}.` : "");
 }
 
 function modelCard() {
@@ -938,17 +943,19 @@ function modelCard() {
 
   leadCards();
 
-  // Four rows, not two: the pooled result for each hazard under each
-  // architecture. Both were fitted on the same panel and the same splits, so
-  // the only thing differing down a hazard's pair is the model.
+  // One row per hazard per architecture the run actually fitted. A run with no
+  // transformer shows two rows, not four: borrowing the figures from an
+  // earlier run would compare that run's label definition, not its model.
   const rows = [];
   for (const haz of ["flood", "storm"]) {
     const h = m[haz];
     rows.push([haz, "xgboost_monotone", h.test_ap, h.lift_over_prevalence,
-      h.vs_best_baseline, h.best_baseline, h.test_ap >= h.tft.test_ap]);
-    rows.push([haz, "temporal_fusion_transformer", h.tft.test_ap,
-      h.tft.lift_over_prevalence, h.tft.vs_best_baseline, h.best_baseline,
-      h.tft.test_ap > h.test_ap]);
+      h.vs_best_baseline, h.best_baseline, hasTft() && h.test_ap >= h.tft.test_ap]);
+    if (hasTft()) {
+      rows.push([haz, "temporal_fusion_transformer", h.tft.test_ap,
+        h.tft.lift_over_prevalence, h.tft.vs_best_baseline, h.best_baseline,
+        h.tft.test_ap > h.test_ap]);
+    }
   }
   el("mc-table").querySelector("tbody").innerHTML = rows.map(
     ([haz, name, ap, lift, vs, base, win]) => `<tr>
@@ -961,22 +968,35 @@ function modelCard() {
         <span class="dim">(${base.replace("single_", "")})</span></td>
     </tr>`).join("");
 
-  const fr = m.flood.test_ap / m.flood.tft.test_ap;
-  const sr = m.storm.test_ap / m.storm.tft.test_ap;
-  el("mc-verdict").innerHTML =
-    `<b>Gradient boosting wins both hazards, so the dashboard serves XGBoost.</b>
-     Floods are close — ${m.flood.test_ap.toFixed(4)} against
-     ${m.flood.tft.test_ap.toFixed(4)}, a ${fr.toFixed(2)}× edge. Hurricanes are
-     not: ${m.storm.test_ap.toFixed(4)} against
-     ${m.storm.tft.test_ap.toFixed(4)} (${sr.toFixed(2)}×), clearing baseline by
-     only ${m.storm.tft.vs_best_baseline.toFixed(2)}×. Likely sample size rather
-     than architecture — hurricane onset is
-     ${pct(m.storm.test_prevalence, 3)} of county-days, so most 30-day encoder
-     windows contain no event. The transformer cost ${m.flood.tft.epochs_run} and
-     ${m.storm.tft.epochs_run} epochs on an ${m.run.gpu} against seconds of
-     boosting. Both transformer columns are post-calibration
-     (${m.flood.tft.calibration.replace(/_/g, " ")}), undoing the
-     positive-class weight of 50 used in training.`;
+  if (!hasTft()) {
+    el("mc-arch-h").textContent = "Gradient boosting (transformer withdrawn)";
+    el("mc-arch-note").textContent = m.tft_status.note;
+    el("mc-verdict").innerHTML =
+      `<b>No architecture comparison is published for this run.</b>
+       The dashboard serves XGBoost because it is the only model fitted on this
+       panel, not because it beat a transformer here. What stands on its own:
+       ${m.flood.test_ap.toFixed(4)} average precision on floods and
+       ${m.storm.test_ap.toFixed(4)} on hurricanes, clearing the strongest
+       single feature by ${m.flood.vs_best_baseline.toFixed(2)}× and
+       ${m.storm.vs_best_baseline.toFixed(2)}×.`;
+  } else {
+    const fr = m.flood.test_ap / m.flood.tft.test_ap;
+    const sr = m.storm.test_ap / m.storm.tft.test_ap;
+    el("mc-verdict").innerHTML =
+      `<b>Gradient boosting wins both hazards, so the dashboard serves XGBoost.</b>
+       Floods are close — ${m.flood.test_ap.toFixed(4)} against
+       ${m.flood.tft.test_ap.toFixed(4)}, a ${fr.toFixed(2)}× edge. Hurricanes are
+       not: ${m.storm.test_ap.toFixed(4)} against
+       ${m.storm.tft.test_ap.toFixed(4)} (${sr.toFixed(2)}×), clearing baseline by
+       only ${m.storm.tft.vs_best_baseline.toFixed(2)}×. Likely sample size rather
+       than architecture — hurricane onset is
+       ${pct(m.storm.test_prevalence, 3)} of county-days, so most 30-day encoder
+       windows contain no event. The transformer cost ${m.flood.tft.epochs_run} and
+       ${m.storm.tft.epochs_run} epochs on an ${m.run.gpu} against seconds of
+       boosting. Both transformer columns are post-calibration
+       (${m.flood.tft.calibration.replace(/_/g, " ")}), undoing the
+       positive-class weight of 50 used in training.`;
+  }
 
   const bl = [];
   for (const haz of ["flood", "storm"]) {
@@ -1000,16 +1020,34 @@ function modelCard() {
      positives come from ${m.label_source.flood}, so a real flood nobody wrote
      up counts as a negative. Hurricane positives (${m.label_source.storm}) are
      purely geometric — a graze and a major landfall are the same positive.`,
-    `<b>Training rainfall is observed, not forecast.</b> Features use station
-     rainfall over the prediction window, which a forecaster would not have on
-     the morning the model runs. The largest overstatement in the project; treat
-     every lead-time number as an upper bound until retrained on GEFSv12.`,
-    `<b>Every measured number is Gulf-only, but the map is national.</b> All
-     average precision, lift and baseline figures on this page were computed on
-     the ${m.n_counties_modeled}-county Gulf panel. The map scores the whole
-     country and does not mark the boundary, so this paragraph is the
-     disclosure: no held-out-state validation exists, and nothing here would
-     establish that the skill carries outside the panel.`,
+    `<b>Training rainfall is observed, not forecast${
+       m.fwd_rain_ablation ? ", and most of the skill lives there" : ""}.</b>
+     Five features describe rain on the days <i>after</i> the prediction date,
+     taken from the same station record the label was built from.${
+       m.fwd_rain_ablation
+         ? ` Refitting without them drops flood average precision from
+             ${m.fwd_rain_ablation.flood.ap_all.toFixed(5)} to
+             ${m.fwd_rain_ablation.flood.ap_no_fwd.toFixed(5)} and hurricane
+             from ${m.fwd_rain_ablation.storm.ap_all.toFixed(5)} to
+             ${m.fwd_rain_ablation.storm.ap_no_fwd.toFixed(5)} —
+             wiping out ${pct(m.fwd_rain_ablation.flood.share_lost, 0)} and
+             ${pct(m.fwd_rain_ablation.storm.share_lost, 0)} of the two
+             headline figures respectively.`
+         : ""} The live page fills those features from an Open-Meteo forecast
+     the models were never scored against, so every number here is an upper
+     bound, not expected live performance.`,
+    `<b>The model was fitted on ${m.n_counties_modeled} of the ${
+       m.n_counties_scored ? fmtInt(m.n_counties_scored) : "—"} Gulf counties
+     the map scores.</b> All average precision, lift and baseline figures on
+     this page were computed on the ${m.n_counties_modeled}-county panel; the
+     rest are scored by the same fitted model with rebuilt rainfall normals.
+     Counties outside the panel are shaded identically and the boundary is not
+     drawn, so this paragraph is the disclosure: those scores are
+     extrapolation. No
+     held-out-state validation exists for this run, and the one transfer test
+     the project has run — removing Texas from training — saw lift on held-out
+     Texas counties fall to 1.11× against 1.51× in-training, a two-thirds loss
+     between states that share a climate.`,
     `<b>Rainfall normals outside the panel were rebuilt, not inherited.</b> Three
      features divide observed rainfall by the county's own 2000&ndash;2008
      normal. The panel's come from its station file; the rest were recomputed
@@ -1030,22 +1068,52 @@ function modelCard() {
      30-, 60- and 90-day rainfall, a weak substitute for catchment state.`,
     `<b>No hurricane wind field.</b> Track forecast, intensity and storm surge
      are absent entirely.`,
-    `<b>Only ${fmtInt(m.flood.n_test_pos)} flood and
-     ${fmtInt(m.storm.n_test_pos)} hurricane onsets in test.</b> Confidence
-     intervals are correspondingly wide, and none are reported.`,
+    `<b>The test counts are county-days, not events.</b>
+     ${fmtInt(m.flood.n_test_pos)} flood and ${fmtInt(m.storm.n_test_pos)}
+     hurricane positive county-days sounds like a large sample${
+       m.episodes
+         ? `, but they pool three lead days and repeat across neighbours: they
+             resolve to ${fmtInt(m.episodes.flood.onset_county_days)} and
+             ${fmtInt(m.episodes.storm.onset_county_days)} onset county-days on
+             ${m.episodes.flood.distinct_dates} and
+             ${m.episodes.storm.distinct_dates} distinct dates, and to roughly
+             ${m.episodes.flood.episodes} and ${m.episodes.storm.episodes}
+             independent weather episodes — clusters more than
+             ${m.episodes.storm.gap_days} quiet days apart. Counties crossed by
+             one system are close to a single observation, so every hurricane
+             figure on this page has an effective sample of about
+             ${m.episodes.storm.episodes} tropical cyclones`
+         : ""}. Confidence intervals are correspondingly wide, would have to be
+     resampled by episode rather than by row, and none are reported.`,
+    `<b>The hurricane model ranks; it does not calibrate.</b> Its Brier skill
+     over the climatological rate is
+     ${m.storm.deviation
+         ? m.storm.deviation.brier_skill_vs_baserate.toFixed(3)
+         : "low"}, against
+     ${m.flood.deviation
+         ? m.flood.deviation.brier_skill_vs_baserate.toFixed(3)
+         : "a higher figure"} for floods — close to simply quoting the base
+     rate. It orders counties by risk usefully, but the probability it prints
+     should not be read as a chance of a storm.`,
   ].map((s) => `<li>${s}</li>`).join("");
 
   const r = m.run;
   el("mc-prov").innerHTML =
-    `Every number on this page comes from one sealed training run,
+    `Every number on this page comes from one training run,
      <code>${r.run_id}</code>, finished ${r.finished_utc} after
-     ${hours(r.wall_seconds)} hours on an ${r.gpu}
-     (xgboost ${r.xgboost}, torch ${r.torch}).
+     ${hours(r.wall_seconds)} hours on
+     ${r.gpu ? `an ${r.gpu}` : `CPU (host ${r.host})`}
+     (xgboost ${r.xgboost}${r.torch ? `, torch ${r.torch}` : ""}).
      ${r.self_contained
-       ? "The run is self-contained: no file outside its own directory "
-         + "contributed to a reported number."
+       ? "No file outside the run's own directory contributed to a reported "
+         + "number."
        : "Warning: the run reports external parents, so some numbers depend on "
          + "files outside it."}
+     ${r.git_dirty
+       ? `Code commit <code>${r.git_commit}</code>, but the working tree carried
+          uncommitted changes when the run started, so the commit is a starting
+          point rather than an exact record of the code that ran.`
+       : `Code commit <code>${r.git_commit}</code>, clean working tree.`}
      Panel sha256 <code>${r.panel_sha256.slice(0, 16)}…</code>; the copy that
      produced this dashboard hashes identically, and all eight boosters were
      reloaded and confirmed to reproduce their recorded test average precision
@@ -1120,9 +1188,8 @@ function wire() {
   }, ALERT_TTL);
 }
 
-/* Grouped by state rather than by panel membership. Every county is listed so
- * that warnings and forecast are reachable anywhere, and with ~3,100 entries the
- * state optgroups are what make the list navigable. */
+/* Grouped by state rather than by panel membership. Every mapped county is
+ * listed so that warnings and forecast are reachable anywhere on the map. */
 function fillPicker() {
   const byState = new Map();
   for (const [f, c] of Object.entries(S.meta.counties)) {

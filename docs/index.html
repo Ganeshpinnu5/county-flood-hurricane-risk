@@ -153,16 +153,16 @@
       <thead><tr>
         <th>Hazard</th><th class="num">Lead</th><th class="num">Base rate</th>
         <th class="num">Baseline</th><th class="num">XGBoost</th>
-        <th class="num">vs base</th><th class="num">TFT</th>
-        <th class="num">vs base</th>
+        <th class="num">vs base</th><th class="num tft-col">TFT</th>
+        <th class="num tft-col">vs base</th>
       </tr></thead>
       <tbody></tbody>
     </table>
   </div>
   <p class="note" id="lead-foot"></p>
 
-  <h3>Gradient boosting vs. the Temporal Fusion Transformer</h3>
-  <p class="note">
+  <h3 id="mc-arch-h">Gradient boosting vs. the Temporal Fusion Transformer</h3>
+  <p class="note" id="mc-arch-note">
     Same panel, same splits, same label. The transformer sees a 30-day encoder
     window per county, trains with a positive-class weight of 50, and is
     calibrated by isotonic regression fitted on validation.

@@ -30,6 +30,7 @@ FLOOD_TYPES = {"Flood", "Flash Flood", "Coastal Flood", "Lakeshore Flood"}
 # Tropical-storm force. Below this the wind field does little damage and the
 # label would be dominated by distant brushes.
 TS_WIND_KT = 34
+QUADS = ("ne", "se", "sw", "nw")
 NM_TO_KM = 1.852
 
 EARTH_KM = 6371.0
@@ -132,7 +133,6 @@ def parse_hurdat2(path):
         # then 34/50/64-kt radii as NE,SE,SW,NW each, then radius of max wind.
         lat = float(parts[4][:-1]) * (1 if parts[4][-1] == "N" else -1)
         lon = float(parts[5][:-1]) * (1 if parts[5][-1] == "E" else -1)
-        r34 = [float(parts[8 + i]) for i in range(4)]
         rows.append({
             "storm_id": sid, "name": name,
             "ts": pd.to_datetime(parts[0] + parts[1], format="%Y%m%d%H%M"),
@@ -141,7 +141,8 @@ def parse_hurdat2(path):
             # -999 is 'not recorded'; 0 before 2004 means the same thing, since
             # the radii were simply not archived then.
             **{f"r34_{q}": (v if v > 0 else np.nan)
-               for q, v in zip(("ne", "se", "sw", "nw"), r34)},
+               for q, v in zip(QUADS,
+                               [float(parts[8 + i]) for i in range(4)])},
         })
     return pd.DataFrame(rows)
 
@@ -158,22 +159,24 @@ def _fallback_radius(track):
     t["bin"] = pd.cut(t["wind_kt"], bins=bins, right=False)
     out = {}
     for b, g in t.groupby("bin", observed=True):
-        vals = g[[f"r34_{q}" for q in ("ne", "se", "sw", "nw")]].to_numpy().ravel()
+        vals = g[[f"r34_{q}" for q in QUADS]].to_numpy().ravel()
         vals = vals[~np.isnan(vals)]
         if len(vals) >= 20:
             out[b] = float(np.median(vals))
     return out, bins
 
 
-def hurdat_events(hurdat_path, counties, start_year, end_year,
-                  wind_kt=TS_WIND_KT):
+def hurdat_events(track, counties, start_year, end_year, wind_kt=TS_WIND_KT):
     """County-days where the 34-kt wind field of a cyclone covered the county.
+
+    `track` is a parsed best track from parse_hurdat2; the caller parses it
+    because the cyclone features need the same frame to verify forecasts
+    against, and the file is large enough that reading it twice is wasteful.
 
     `counties` is a frame of county_fips / lat / lon. The track is interpolated
     to hourly before testing, because a storm moving at 20 kt covers ~130 km
     between archived 6-hourly fixes and would otherwise skip counties.
     """
-    track = parse_hurdat2(hurdat_path)
     track = track[(track["ts"].dt.year >= start_year)
                   & (track["ts"].dt.year <= end_year)]
 
@@ -182,11 +185,10 @@ def hurdat_events(hurdat_path, counties, start_year, end_year,
     # Only positions at or above the wind threshold can produce exposure, but
     # interpolation needs the neighbouring fixes too, so filter per storm after
     # resampling rather than before.
-    keep_cols = ["ts", "lat", "lon", "wind_kt",
-                 "r34_ne", "r34_se", "r34_sw", "r34_nw"]
+    keep_cols = ["lat", "lon", "wind_kt"] + [f"r34_{q}" for q in QUADS]
     pieces = []
     for sid, g in track.groupby("storm_id", sort=False):
-        g = g.sort_values("ts").set_index("ts")[keep_cols[1:]]
+        g = g.sort_values("ts").set_index("ts")[keep_cols]
         if len(g) < 2:
             continue
         g = g.resample("1h").interpolate("linear", limit_direction="both")
@@ -203,14 +205,15 @@ def hurdat_events(hurdat_path, counties, start_year, end_year,
               & (pos["lon"].between(counties["lon"].min() - pad,
                                     counties["lon"].max() + pad))]
     if pos.empty:
-        return pd.DataFrame(columns=["county_fips", "begin", "end"])
+        return pd.DataFrame(columns=["county_fips", "storm_id",
+                                     "begin", "end", "peak_wind_kt"])
 
     # Resolve each position's quadrant radii, filling gaps from the bin medians.
     bin_idx = np.digitize(pos["wind_kt"].to_numpy(), bins) - 1
     fb = np.array([fallback.get(pd.Interval(bins[i], bins[i + 1], closed="left"),
                                 np.nan) for i in bin_idx])
     R = {}
-    for q in ("ne", "se", "sw", "nw"):
+    for q in QUADS:
         r = pos[f"r34_{q}"].to_numpy()
         R[q] = np.where(np.isnan(r), fb, r) * NM_TO_KM
 
@@ -232,12 +235,14 @@ def hurdat_events(hurdat_path, counties, start_year, end_year,
             hits.append(pd.DataFrame({"county_fips": fips, "storm_id": pstorm[m],
                                       "date": pday[m], "wind_kt": pwind[m]}))
     if not hits:
-        return pd.DataFrame(columns=["county_fips", "storm_id", "begin", "end"])
+        return pd.DataFrame(columns=["county_fips", "storm_id",
+                                     "begin", "end", "peak_wind_kt"])
 
     h = pd.concat(hits, ignore_index=True)
     daily = h.groupby(["county_fips", "storm_id", "date"],
                       as_index=False)["wind_kt"].max()
-    ev = _runs_to_intervals(daily, ["county_fips", "storm_id"])
-    peak = (daily.groupby(["county_fips", "storm_id"])["wind_kt"].max()
+    keys = ["county_fips", "storm_id"]
+    ev = _runs_to_intervals(daily, keys)
+    peak = (daily.groupby(keys)["wind_kt"].max()
             .rename("peak_wind_kt").reset_index())
-    return ev.merge(peak, on=["county_fips", "storm_id"], how="left")
+    return ev.merge(peak, on=keys, how="left")

@@ -11,8 +11,10 @@ times on this project a loose path produced numbers nobody could trace.
 Scoring a saved booster has one trap. Early stopping keeps training for `early`
 more rounds after the best one, and `save_model` writes all of them, so the file
 holds `best_iteration + early` trees. Predicting with the whole file silently
-scores an overfit model -- here the flood file has 387 trees for a best
-iteration of 336. `iteration_range` is therefore mandatory, and `best_iteration`
+scores an overfit model -- here the flood file has 333 trees for a best
+iteration of 282, and the storm file 59 for a best iteration of 8, so the storm
+model is the sharper trap: scoring the whole file uses seven times the trees
+that were selected. `iteration_range` is therefore mandatory, and `best_iteration`
 comes from the run's own results JSON rather than from the file.
 """
 
@@ -23,16 +25,23 @@ import pathlib
 import pandas as pd
 import xgboost as xgb
 
+import cyclone_features
+
 # The run this dashboard reports. Pinned, not globbed: picking "the newest run"
 # would let a smoke test silently become the published model.
 #
 # 20261104T015759Z-run is kept on disk but is no longer scored from: its pooled
 # y_flood/y_storm came from the label window this run corrects, so roughly two
-# thirds of its positives were days the event had already begun. This run holds
-# XGBoost only -- the two pooled TFTs still need a GPU rerun against the new
-# panel, so export_v2.py and make_report.py will fail loudly here until that
-# lands rather than mixing architectures across two label definitions.
-RUN_ID = os.environ.get("CRISK_RUN_ID", "20261106T012030Z-run")
+# thirds of its positives were days the event had already begun.
+#
+# The previous pin, 20261108T050140Z-run, is not committed to any repository, so
+# a fresh clone could not reproduce what the dashboard served. This run carries
+# boosters that are byte-identical to it and is published, so the pin now names
+# something a reader can actually fetch.
+#
+# This run also holds a full transformer, trained cold on the same panel and
+# splits. It loses on both hazards, so the booster is still what gets served.
+RUN_ID = os.environ.get("CRISK_RUN_ID", "20261108T225052Z-run")
 RUN_DIR = pathlib.Path(
     os.environ.get("CRISK_RUN_DIR", f"artifacts/runs/{RUN_ID}")
 )
@@ -44,7 +53,13 @@ FEATS = [
     "prcp_prev30", "prcp_prev60", "prcp_prev90", "prcp_fwd1", "prcp_fwd3",
     "prcp_fwd3_max", "ratio_prev3", "ratio_fwd3", "ratio_prev30", "log_fwd3",
     "tmax", "tmin", "month_sin", "month_cos", "hurricane_season",
-    "lat", "lon", "pop_density", "RPL_THEME1", "RPL_THEME4", "RPL_THEMES",
+    "lat", "lon", "pop_density",
+    # Cyclone features, from the official forecast as it was issued. Shared with
+    # the flood model deliberately: a large share of Gulf Coast flooding is
+    # tropical in origin, so "a hurricane is forecast to pass 60 km away" is
+    # legitimate flood information, not a confound. audit_variants.py measures
+    # what each hazard actually gains, so the retrain does not have to assume it.
+    *cyclone_features.FEATURES,
 ]
 
 HAZARDS = ("flood", "storm")
@@ -62,6 +77,18 @@ def run_dir():
 
 def results(name):
     return json.loads((run_dir() / "results" / name).read_text())
+
+
+def results_opt(name):
+    """`results` for a file a run is allowed not to have.
+
+    Only the architectures a run actually trained may be reported. A run with
+    no transformer must publish no transformer numbers, rather than borrowing
+    them from an earlier run trained against a different label definition --
+    which would make the headline comparison a comparison of two labels.
+    """
+    p = run_dir() / "results" / name
+    return json.loads(p.read_text()) if p.exists() else None
 
 
 def _scorer(path, best_iteration):
@@ -132,6 +159,12 @@ def provenance():
         "wall_seconds": man["wall_seconds"],
         "self_contained": man["self_contained"],
         "panel_sha256": man["panel"]["sha256"],
+        # self_contained is a claim about outputs: nothing outside the run
+        # directory fed a reported number. It says nothing about whether the
+        # code that ran is recoverable, which is what `dirty` answers.
+        "git_commit": man["git"]["commit"][:12],
+        "git_dirty": man["git"]["dirty"],
+        "host": man["host"],
         "gpu": man["versions"].get("cuda"),
         "xgboost": man["versions"].get("xgboost"),
         "torch": man["versions"].get("torch"),

@@ -54,12 +54,14 @@ GULF_FIPS = ("01", "12", "22", "28", "48")
 # the cached tables, unread.
 REQUIRED = ["lat", "lon", "pop_density", "p95_prev3", "p95_fwd3", "mean_prev30"]
 
-# Open-Meteo's free tier allows 600 calls/minute. Going national takes this from
-# 356 requests to ~3,100, and at eight unthrottled workers the archive endpoint
-# started returning 429s partway through, losing whole blocks of adjacent
-# counties. Half the published ceiling costs about ten minutes and holds.
-WORKERS = 6
-MIN_INTERVAL = 0.2
+# Open-Meteo accepts comma-separated coordinate lists, so the whole Gulf is a
+# handful of requests rather than one per county. That is not an optimisation:
+# GitHub's shared runner IPs are throttled per-request so hard that 534
+# individual calls could not finish inside a 30-minute job, while the same
+# counties in 11 batched calls take seconds from the same runner.
+CHUNK = 50
+WORKERS = 3
+MIN_INTERVAL = 1.0
 
 # A throttled run returning a fraction of the counties would overwrite a good
 # file and read on the map as the model losing coverage overnight, rather than
@@ -145,13 +147,13 @@ def gauge_ratios(rebuild=False):
     return out
 
 
-def fetch(row):
-    """One county's rainfall history and forecast, retried on a soft failure.
+def fetch_chunk(rows):
+    """Rainfall history and forecast for up to CHUNK counties in one request.
 
-    Open-Meteo throttles a burst of a few hundred requests, so roughly one
-    county in twelve fails on the first attempt. Without the retry those
-    counties drop off the map for the whole day with no visible reason, which
-    reads as missing coverage rather than as a rate limit.
+    The multi-location response is an array in coordinate order, except that a
+    single location comes back as a bare object. A count mismatch is treated as
+    a failure of the whole chunk rather than guessed through: misaligning the
+    zip would silently score every county on its neighbour's weather.
     """
     err = None
     for attempt in range(4):
@@ -162,15 +164,15 @@ def fetch(row):
             r = requests.get(
                 API,
                 params={
-                    "latitude": round(row.lat, 4),
-                    "longitude": round(row.lon, 4),
+                    "latitude": ",".join(f"{row.lat:.4f}" for row in rows),
+                    "longitude": ",".join(f"{row.lon:.4f}" for row in rows),
                     "daily": "precipitation_sum,temperature_2m_max,temperature_2m_min,"
                              "wind_speed_10m_max,wind_gusts_10m_max",
                     "timezone": "America/Chicago",
                     "past_days": PAST,
                     "forecast_days": REQ_FWD,
                 },
-                timeout=30,
+                timeout=60,
             )
             # A 429 means the whole pool is over the cap, so backing off this one
             # thread is not enough; pause every worker by pushing the shared gate.
@@ -180,10 +182,17 @@ def fetch(row):
                     _next_at[0] = max(_next_at[0], time.monotonic() + 20)
                 continue
             r.raise_for_status()
-            return row.county_fips, r.json()["daily"], None
+            js = r.json()
+            if isinstance(js, dict):
+                js = [js]
+            if len(js) != len(rows):
+                err = f"expected {len(rows)} locations, got {len(js)}"
+                continue
+            return [(row.county_fips, loc["daily"], None)
+                    for row, loc in zip(rows, js)]
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
-    return row.county_fips, None, err
+    return [(row.county_fips, None, err) for row in rows]
 
 
 def build_rows(fips, daily, static, feats):
@@ -261,8 +270,13 @@ def main(rebuild_static=False):
           flush=True)
 
     t0 = time.time()
+    all_rows = list(cs.itertuples(index=False))
+    chunks = [all_rows[i:i + CHUNK] for i in range(0, len(all_rows), CHUNK)]
+    results = []
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        results = list(ex.map(fetch, list(cs.itertuples(index=False))))
+        for n, batch in enumerate(ex.map(fetch_chunk, chunks), 1):
+            results.extend(batch)
+            print(f"  chunk {n}/{len(chunks)}", flush=True)
 
     ok = {f: d for f, d, _ in results if d}
     print(f"  {len(ok)}/{len(cs)} succeeded in {(time.time()-t0)/60:.1f} min")

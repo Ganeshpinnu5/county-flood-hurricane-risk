@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import requests
 
+import cyclone_features
 from config import OUT_DIR
 from v2_models import FEATS, LEADS, load_lead_scorers, load_scorers, provenance
 
@@ -32,20 +33,26 @@ FWD = 4
 # toward "calm" -- the one direction a hazard dashboard must not fail in.
 HORIZON = 3
 REQ_FWD = FWD + HORIZON
-STATIC = ["lat", "lon", "n_stations", "AREA_SQMI", "E_TOTPOP", "RPL_THEME1",
-          "RPL_THEME4", "RPL_THEMES", "pop_density", "p95_prev3", "p95_fwd3",
-          "mean_prev30"]
+STATIC = ["lat", "lon", "n_stations", "AREA_SQMI", "E_TOTPOP", "pop_density",
+          "p95_prev3", "p95_fwd3", "mean_prev30"]
 REFDATA = pathlib.Path(__file__).parent / "refdata"
 STATIC_CSV = REFDATA / "county_static.csv"
 NATIONAL_CSV = REFDATA / "county_static_national.csv"
+# AL, FL, LA, MS, TX. The dashboard was briefly national; the project was
+# scoped back to the Gulf, so only these states are fetched and scored.
+GULF_FIPS = ("01", "12", "22", "28", "48")
 
-# Nine of the twenty-six model features come from the static table, directly or
-# as the denominator of a ratio. A county missing any of them cannot be scored:
+# Six of the model features come from the static table, directly or as the
+# denominator of a ratio. A county missing any of them cannot be scored:
 # XGBoost would still return a number, because it routes NaN down a learned
 # default branch, and that number would be indistinguishable on the map from a
 # real one. Skipping is the only honest option.
-REQUIRED = ["lat", "lon", "pop_density", "RPL_THEME1", "RPL_THEME4",
-            "RPL_THEMES", "p95_prev3", "p95_fwd3", "mean_prev30"]
+#
+# The three CDC SVI themes used to be required here and left with the model. No
+# county gains coverage from that: the 8 the national table still drops are
+# missing rainfall climatology, not social vulnerability. The columns stay in
+# the cached tables, unread.
+REQUIRED = ["lat", "lon", "pop_density", "p95_prev3", "p95_fwd3", "mean_prev30"]
 
 # Open-Meteo's free tier allows 600 calls/minute. Going national takes this from
 # 356 requests to ~3,100, and at eight unthrottled workers the archive endpoint
@@ -90,6 +97,7 @@ def county_static(rebuild=False):
     if src.exists() and not rebuild:
         cs = pd.read_csv(src, dtype={"county_fips": str})
         cs["county_fips"] = cs["county_fips"].str.zfill(5)
+        cs = cs[cs["county_fips"].str[:2].isin(GULF_FIPS)].reset_index(drop=True)
         full = cs[REQUIRED].notna().all(axis=1)
         if not full.all():
             print(f"{src.name}: {len(cs)} counties, "
@@ -106,6 +114,35 @@ def county_static(rebuild=False):
     cs.to_csv(STATIC_CSV, index=False)
     print(f"cached {len(cs)} county constants to {STATIC_CSV}")
     return cs
+
+
+GAUGE_RATIO_JSON = REFDATA / "gauge_ratio.json"
+
+
+def gauge_ratios(rebuild=False):
+    """Median wet-day prcp_max_stn/prcp per county, read off the panel.
+
+    Training's prcp_max_stn is the max across a county's gauges, but the live
+    fetch has one grid value per county, and serving that value as both prcp
+    and prcp_max_stn understates the feature everywhere the panel had more
+    than one gauge -- which is the dense-gauge metro counties, exactly where
+    hurricane risk concentrates. The understatement only pushes live scores
+    down. Multiplying the grid value by the county's own training-time ratio
+    restores the feature's scale. Counties outside the panel stay at 1.0,
+    which is exact for the single-gauge majority (245 of 356 panel counties).
+    Cached for the same reason as county_static: the daily refresh runs from
+    a checkout without the panel. Rebuild after a panel change.
+    """
+    if GAUGE_RATIO_JSON.exists() and not rebuild:
+        return json.loads(GAUGE_RATIO_JSON.read_text())
+    panel = pd.read_parquet(OUT_DIR / "daily_panel.parquet",
+                            columns=["county_fips", "prcp", "prcp_max_stn"])
+    wet = panel[panel["prcp"] >= 1.0]
+    r = (wet["prcp_max_stn"] / wet["prcp"]).groupby(wet["county_fips"]).median()
+    out = {str(f): round(float(v), 4) for f, v in r.items() if np.isfinite(v)}
+    GAUGE_RATIO_JSON.write_text(json.dumps(out, indent=0, sort_keys=True))
+    print(f"cached {len(out)} gauge ratios to {GAUGE_RATIO_JSON}")
+    return out
 
 
 def fetch(row):
@@ -177,7 +214,7 @@ def build_rows(fips, daily, static, feats):
 
         f = {
             "prcp": float(prcp.iloc[i]),
-            "prcp_max_stn": float(prcp.iloc[i]),
+            "prcp_max_stn": float(prcp.iloc[i]) * float(static["gauge_ratio"]),
             "tmax": float(tmax.iloc[i]) if pd.notna(tmax.iloc[i]) else np.nan,
             "tmin": float(tmin.iloc[i]) if pd.notna(tmin.iloc[i]) else np.nan,
         }
@@ -217,7 +254,11 @@ def main(rebuild_static=False):
     scorers = load_scorers()
     per_lead = load_lead_scorers()
     cs = county_static(rebuild=rebuild_static)
-    print(f"fetching live weather for {len(cs)} counties ...", flush=True)
+    ratios = gauge_ratios(rebuild=rebuild_static)
+    cs["gauge_ratio"] = cs["county_fips"].map(ratios).fillna(1.0)
+    print(f"fetching live weather for {len(cs)} counties "
+          f"({(cs['gauge_ratio'] > 1).sum()} with a gauge-ratio correction) ...",
+          flush=True)
 
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
@@ -244,6 +285,34 @@ def main(rebuild_static=False):
             weather.setdefault(fips, {})[day] = w
 
     X = pd.DataFrame(rows)
+    X.insert(0, "day", [d for _, d in keys])
+    X.insert(0, "county_fips", [f for f, _ in keys])
+
+    # The same county-days, from the official forecast that is on the wire right
+    # now rather than from the archive the panel was built against.
+    cyc = cyclone_features.live(cs[["county_fips", "lat", "lon"]],
+                                sorted({d for _, d in keys}))
+    cyc["day"] = cyc.pop("DATE").dt.strftime("%Y-%m-%d")
+    n = len(X)
+    X = X.merge(cyc, on=["county_fips", "day"], how="left")
+    if len(X) != n:
+        raise SystemExit(
+            f"cyclone merge changed the row count, {n} -> {len(X)}: a duplicated "
+            f"county-day would misalign every probability written below")
+    # A null cyc_active means a storm was under advisory but its forecast did
+    # not reach this date, so the cyclone block is unknown rather than quiet.
+    # Dropped on the same principle as a day with a short rainfall window: the
+    # booster never saw a null here and would route it down an arbitrary default
+    # branch, returning a number indistinguishable on the map from a real one.
+    unknown = X["cyc_active"].isna()
+    if unknown.any():
+        print(f"  cyclone: dropped {int(unknown.sum())} county-days beyond the "
+              f"forecast horizon ({sorted(X.loc[unknown, 'day'].unique())})")
+        X = X[~unknown].reset_index(drop=True)
+    act = int(X["cyc_active"].sum())
+    print(f"  cyclone: {act}/{len(X)} county-days with an active storm"
+          + (f", closest {X['cyc_dist_min'].min():.0f} km" if act else ""))
+
     missing = [c for c in FEATS if c not in X.columns]
     if missing:
         raise SystemExit(f"live features missing {missing}")
@@ -258,7 +327,8 @@ def main(rebuild_static=False):
     cols = (["p_flood", "p_storm"]
             + [f"p_flood_l{k}" for k in LEADS] + [f"p_storm_l{k}" for k in LEADS])
     days = {}
-    for (fips, day), vals in zip(keys, X[cols].itertuples(index=False, name=None)):
+    for fips, day, *vals in X[["county_fips", "day"] + cols].itertuples(
+            index=False, name=None):
         pf, ps, *leads = (round(float(v), 5) for v in vals)
         days.setdefault(day, []).append(
             [fips, pf, ps, weather[fips][day]["fwd3"], None, 0, 0] + leads
@@ -271,7 +341,6 @@ def main(rebuild_static=False):
         "run_id": provenance()["run_id"],
         "n_counties": len(ok),
         "days": days,
-        "weather": weather,
     }
     p = pathlib.Path("docs/data/live.json")
     p.write_text(json.dumps(payload, separators=(",", ":")))

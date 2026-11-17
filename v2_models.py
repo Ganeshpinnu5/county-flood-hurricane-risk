@@ -34,17 +34,20 @@ import cyclone_features
 # y_flood/y_storm came from the label window this run corrects, so roughly two
 # thirds of its positives were days the event had already begun.
 #
-# The previous pin, 20261108T050140Z-run, is not committed to any repository, so
-# a fresh clone could not reproduce what the dashboard served. This run carries
-# boosters that are byte-identical to it and is published, so the pin now names
-# something a reader can actually fetch.
+# 20261115T174654Z-hpc-full supersedes 20261108T225052Z-run: same panel
+# (sha-verified), same splits and embargo, retrained cold on CREST (H100,
+# Slurm job 1568242) with the full transformer in the same sealed run.
 #
-# This run also holds a full transformer, trained cold on the same panel and
-# splits. It loses on both hazards, so the booster is still what gets served.
-RUN_ID = os.environ.get("CRISK_RUN_ID", "20261108T225052Z-run")
+# The transformer loses pooled on both hazards (flood 0.201 vs 0.265, storm
+# 0.400 vs 0.541) and 5 of 6 exact leads -- it is ahead only at flood lead 2
+# -- so the booster is still what gets served.
+RUN_ID = os.environ.get("CRISK_RUN_ID", "20261115T174654Z-hpc-full")
 RUN_DIR = pathlib.Path(
     os.environ.get("CRISK_RUN_DIR", f"artifacts/runs/{RUN_ID}")
 )
+# Result and model filenames carry the run's tag ("run", "hpc-full", ...),
+# which is everything after the timestamp in the run id.
+TAG = RUN_ID.split("-", 1)[1]
 
 # Order matters: a DMatrix built from a DataFrame takes its feature names from
 # the column order, and xgboost rejects a layout that differs from training.
@@ -121,9 +124,9 @@ def _scorer(path, best_iteration):
 
 def load_scorers():
     """Pooled models: probability that onset falls anywhere in t+1..t+3."""
-    res = results("xgb_run.json")
+    res = results(f"xgb_{TAG}.json")
     return {
-        haz: _scorer(run_dir() / "models" / f"xgb_{haz}_run.json",
+        haz: _scorer(run_dir() / "models" / f"xgb_{haz}_{TAG}.json",
                      res[haz]["best_iteration"])
         for haz in HAZARDS
     }
@@ -138,13 +141,13 @@ def load_lead_scorers():
     Reporting the pooled number as a 3-day forecast is the overstatement this
     sweep exists to avoid.
     """
-    res = results("leads_run.json")
+    res = results(f"leads_{TAG}.json")
     out = {}
     for haz in HAZARDS:
         for k in LEADS:
             key = f"{haz}_l{k}"
             out[(haz, k)] = _scorer(
-                run_dir() / "models" / f"xgb_{haz}_l{k}_run.json",
+                run_dir() / "models" / f"xgb_{haz}_l{k}_{TAG}.json",
                 res[key]["best_iteration"],
             )
     return out
@@ -185,8 +188,14 @@ if __name__ == "__main__":
         for k in LEADS:
             panel[f"y_{h}_l{k}"] = g.shift(-k).fillna(0).astype("int8")
 
-    prm = results("params_run.json")
+    prm = results(f"params_{TAG}.json")
     cap = {h: int(v) for h, v in prm.get("label_end", {}).items()}
+    # pipeline.py drops the panel's last EMBARGO days before splitting (their
+    # forward labels are unverifiable); the same trim is needed to reproduce
+    # the recorded APs on the same rows.
+    embargo = max([prm["embargo_days"], *prm["leads"]]) if prm["embargo_days"] else 0
+    if embargo:
+        panel = panel[panel["DATE"] <= panel["DATE"].max() - pd.Timedelta(days=embargo)]
     test = panel[panel["year"].between(*prm["years"]["test"])]
 
     def rows(haz):
@@ -196,10 +205,10 @@ if __name__ == "__main__":
     print(json.dumps(provenance(), indent=2))
     bad = 0
     for (label, fn, target, haz, want) in (
-        [(h, load_scorers()[h], f"y_{h}", h, results("xgb_run.json")[h]["test"]["ap"])
+        [(h, load_scorers()[h], f"y_{h}", h, results(f"xgb_{TAG}.json")[h]["test"]["ap"])
          for h in HAZARDS]
         + [(f"{h}_l{k}", load_lead_scorers()[(h, k)], f"y_{h}_l{k}", h,
-            results("leads_run.json")[f"{h}_l{k}"]["test"]["ap"])
+            results(f"leads_{TAG}.json")[f"{h}_l{k}"]["test"]["ap"])
            for h in HAZARDS for k in LEADS]
     ):
         d = rows(haz)

@@ -14,6 +14,7 @@ import os
 import numpy as np
 import pandas as pd
 
+import cyclone_features
 import labels
 from config import DATA_DIR, FILES, DROP_INCIDENT_TYPES, STORM_TYPES, OUT_DIR
 
@@ -208,13 +209,14 @@ def main():
 
     noaa = labels.noaa_flood_events(DATA_DIR / FILES["stormevents"],
                                     set(counties["county_fips"]), START, end_year)
-    hurr = labels.hurdat_events(DATA_DIR / FILES["hurdat2"], counties,
-                                START, end_year)
+    track = labels.parse_hurdat2(DATA_DIR / FILES["hurdat2"])
+    hurr = labels.hurdat_events(track, counties, START, end_year)
     fema = fema_events()
     print(f"  noaa flood : {len(noaa):,} county-events, "
           f"{noaa['EPISODE_ID'].nunique():,} episodes")
     print(f"  hurdat2    : {len(hurr):,} county-intervals, "
-          f"{hurr['storm_id'].nunique()} storms")
+          f"{hurr['storm_id'].nunique()} storms, "
+          f"{hurr['county_fips'].nunique()} counties")
     print(f"  fema       : {len(fema):,} county-incidents (secondary target)")
 
     hurr_last = int(hurr["begin"].dt.year.max())
@@ -227,10 +229,13 @@ def main():
 
     d = add_labels(d, {
         "flood": noaa,                              # primary hazard label
-        "storm": hurr,                              # primary hazard label
+        "storm": hurr,
         "fema_flood": fema[fema["is_flood"] == 1],   # secondary: costly events
         "fema_storm": fema[fema["is_storm"] == 1],
     })
+
+    print("cyclone features from the forecast as issued ...", flush=True)
+    d = cyclone_features.attach(d, counties, track)
 
     # Drop the warm-up period where antecedent windows are incomplete.
     d = d[d["DATE"] >= pd.Timestamp(f"{START}-04-01")]

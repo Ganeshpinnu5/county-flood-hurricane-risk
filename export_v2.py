@@ -150,15 +150,15 @@ def live_n_counties():
 
 
 def main():
-    prm = v2_models.results("params_run.json")
-    xgb_res = v2_models.results("xgb_run.json")
-    lead_res = v2_models.results("leads_run.json")
+    prm = v2_models.results(f"params_{v2_models.TAG}.json")
+    xgb_res = v2_models.results(f"xgb_{v2_models.TAG}.json")
+    lead_res = v2_models.results(f"leads_{v2_models.TAG}.json")
 
     # Optional: a run that trained no transformer publishes no transformer
     # numbers. Borrowing them from a run with a different label definition
     # would turn the architecture comparison into a label comparison.
-    tft_res = v2_models.results_opt("tft_run.json")
-    tft_lead_res = v2_models.results_opt("tft_leads_run.json")
+    tft_res = v2_models.results_opt(f"tft_{v2_models.TAG}.json")
+    tft_lead_res = v2_models.results_opt(f"tft_leads_{v2_models.TAG}.json")
     has_tft = tft_res is not None and tft_lead_res is not None
     if not has_tft:
         print("no transformer results in this run -- "
@@ -357,7 +357,7 @@ def main():
         typed into the page is a figure that will not be updated with the
         next run.
         """
-        p = v2_models.run_dir() / "results" / f"deviation_{haz}_run.csv"
+        p = v2_models.run_dir() / "results" / f"deviation_{haz}_{v2_models.TAG}.csv"
         d = pd.read_csv(p, index_col=0)
         return d["xgboost"].to_dict()
 

@@ -16,13 +16,14 @@ from docx.shared import Pt
 
 HERE = Path(__file__).parent
 RUNS = HERE / "artifacts" / "runs"
-RUN = "20261108T225052Z-run"
+RUN = "20261115T174654Z-hpc-full"
+TAG = RUN.split("-", 1)[1]
 XGB_RUN = TFT_RUN = RUN
 AUTHOR = "Ganesh Pinnu"
 
 
 def summary(run):
-    path = RUNS / run / "results" / "summary_run.csv"
+    path = RUNS / run / "results" / f"summary_{TAG}.csv"
     out = {}
     for r in csv.DictReader(path.open()):
         out[(r["hazard"], r["model"])] = r
@@ -30,14 +31,14 @@ def summary(run):
 
 
 def deviation(run, hazard):
-    path = RUNS / run / "results" / f"deviation_{hazard}_run.csv"
+    path = RUNS / run / "results" / f"deviation_{hazard}_{TAG}.csv"
     rows = list(csv.reader(path.open()))
     cols = rows[0][1:]
     return {r[0]: dict(zip(cols, r[1:])) for r in rows[1:]}
 
 
 def leads(run):
-    path = RUNS / run / "results" / "leads_run.csv"
+    path = RUNS / run / "results" / f"leads_{TAG}.csv"
     return list(csv.DictReader(path.open()))
 
 
@@ -47,7 +48,7 @@ def f(x, n=3):
 
 def load():
     man = json.loads((RUNS / XGB_RUN / "manifest.json").read_text())
-    tft = json.loads((RUNS / TFT_RUN / "results" / "tft_run.json").read_text())
+    tft = json.loads((RUNS / TFT_RUN / "results" / f"tft_{TAG}.json").read_text())
     d = {
         "man": man,
         "xgb": summary(XGB_RUN),
@@ -60,7 +61,7 @@ def load():
     d["rows"] = panel["rows_as_read"]
     d["counties"] = panel["counties_as_read"]
     booster = json.loads(
-        (RUNS / XGB_RUN / "models" / "xgb_flood_run.json").read_text())
+        (RUNS / XGB_RUN / "models" / f"xgb_flood_{TAG}.json").read_text())
     d["n_feats"] = len(booster["learner"]["feature_names"])
     return d
 

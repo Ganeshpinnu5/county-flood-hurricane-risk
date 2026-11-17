@@ -94,11 +94,17 @@ def parse(log):
         r"=== xgboost (\w+) ===\n\s+best_iteration=(\d+)\s+([\d.]+)s", log
     ):
         fit[f"xgb:{haz}"] = {"best_iteration": int(it), "seconds": float(secs)}
-    for haz, ep, vl, secs in re.findall(
-        r"=== tft (\w+) ===\n\s+epochs=(\d+)\s+best_val_loss=([\d.]+)\s+([\d.]+)s",
+    # Both selection metrics are matched, and whichever the log printed is the
+    # key recorded. Runs from before the transformer moved to validation AP
+    # print best_val_loss, and filing that number under best_val_ap would
+    # invert its meaning: lower is better for one, higher for the other.
+    for haz, ep, metric, val, secs in re.findall(
+        r"=== tft (\w+) ===\n\s+epochs=(\d+)\s+best_val_(loss|ap)=([\d.]+)"
+        r"\s+([\d.]+)s",
         log
     ):
-        fit[f"tft:{haz}"] = {"epochs_run": int(ep), "best_val_loss": float(vl),
+        fit[f"tft:{haz}"] = {"epochs_run": int(ep),
+                             f"best_val_{metric}": float(val),
                              "seconds": float(secs)}
 
     warm = dict(re.findall(r"warm-start (\w+): xgb=(\w+)\s+tft=(\w+)", log)

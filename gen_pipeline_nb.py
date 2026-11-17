@@ -6,6 +6,7 @@ directly means the next run of the .py silently disagrees with it.
 """
 
 import json
+import subprocess
 from pathlib import Path
 
 HEADER = """# County flood / hurricane risk -- training pipeline
@@ -14,10 +15,22 @@ Generated from `pipeline.py` by `gen_pipeline_nb.py`; edit the .py and
 regenerate rather than editing here.
 
 **Colab setup.** Runtime > Change runtime type > T4 GPU. Expects
-`MyDrive/crisk/artifacts/daily_panel.parquet`.
+`MyDrive/crisk/artifacts/daily_panel.parquet`, and beside it in
+`MyDrive/crisk/`:
 
-Add one cell above cell 1 holding the environment flags, because cell 2 reads
-them as it runs and a flag set afterwards has no effect:
+    cyclone_features.py
+    labels.py
+    fetch_nhc_adeck.py
+
+Those three are imported by cell 4. The panel already carries the 21 cyclone
+columns baked in, so the modules are needed for the feature list and the dense
+imputation rule rather than to refetch any advisory -- the a-deck parquet does
+not have to be on Drive.
+
+Cell 1 stamps `CRISK_GIT_COMMIT` with the commit this notebook was generated
+from, so the run's manifest can claim self-contained even though Colab has no
+checkout. Add one cell above it holding the environment flags, because cell 3
+reads them as it runs and a flag set afterwards has no effect:
 
     %env CRISK_COLD=1
 
@@ -51,9 +64,36 @@ def cells(src):
     return out
 
 
+def _git(*args):
+    try:
+        return subprocess.run(["git", *args], capture_output=True, text=True,
+                              cwd=Path(__file__).parent).stdout.strip()
+    except OSError:
+        return ""
+
+
+def stamp():
+    """The commit this notebook is a faithful copy of, or nothing.
+
+    A stamp from a dirty tree would let a Colab run claim self-contained
+    against code the commit does not actually hold, so refuse one.
+    """
+    commit = _git("rev-parse", "HEAD")
+    if not commit:
+        print("no git checkout -- notebook carries no commit stamp")
+        return None
+    if _git("status", "--porcelain"):
+        print("tree is dirty -- notebook carries no commit stamp")
+        return None
+    return f"%env CRISK_GIT_COMMIT={commit}"
+
+
 def main():
     here = Path(__file__).parent
     code = cells((here / "pipeline.py").read_text())
+    s = stamp()
+    if s:
+        code.insert(0, s)
     nb = {
         "cells": [{"cell_type": "markdown", "metadata": {},
                    "source": HEADER.splitlines(keepends=True)}]

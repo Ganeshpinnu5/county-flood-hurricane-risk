@@ -161,6 +161,11 @@ def detect_env():
 
 
 ENV = os.environ.get("CRISK_ENV_KIND") or detect_env()
+# The manifest wants "what kind of machine", not "whose": a personal
+# machine's hostname names its owner, and the run directory is committed.
+# Containers and cluster nodes carry anonymous names, so those stay.
+HOST = platform.node() if ENV in ("colab", "hpc") else ENV
+HOST = os.environ.get("CRISK_HOST", HOST)
 
 if ENV == "colab":
     from google.colab import drive
@@ -197,6 +202,16 @@ if ENV == "colab" and not os.environ.get("CRISK_ROOT"):
         else:
             print(f"CRISK_ROOT unset and no panel under {_md}/*/crisk/artifacts")
 
+# ROOT is the import root too, not just the data root. CELL 3 imports
+# cyclone_features, which imports labels; both live beside this file. Run as a
+# script that resolves for free, because the script's own directory leads
+# sys.path -- which is why it has never come up locally or on CREST. A notebook
+# has no such entry: Colab runs with cwd /content while the modules sit on
+# Drive under ROOT, so the import raises ModuleNotFoundError three cells in,
+# after the mount and the dependency install have already been paid for.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 PATHS = {
     "root": ROOT,
     "data": ROOT / "data",            # raw staged inputs (Drive / WinSCP)
@@ -214,6 +229,22 @@ PATHS = {
 for k in ("artifacts", "models", "plots", "results", "scratch"):
     PATHS[k].mkdir(parents=True, exist_ok=True)
 
+
+def rel(p):
+    """Render a path for the record, relative to the run root.
+
+    The manifest and the console log are both committed with the run, so an
+    absolute path here publishes the machine and account that produced it. The
+    location inside the run is the only part that still means anything on
+    another machine anyway. Paths outside the root degrade to their basename
+    rather than leaking an upward traversal.
+    """
+    p = Path(p)
+    try:
+        return p.resolve().relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return p.name
+
 PARAMS = {
     "tag": os.environ.get("CRISK_TAG", "run"),
     "smoke": os.environ.get("CRISK_SMOKE", "0") == "1",
@@ -227,6 +258,12 @@ PARAMS = {
     # Contiguous blocks, never shuffled: adjacent days share a weather state,
     # so a random split leaks the answer across the boundary.
     "years": {"train": [2000, 2014], "val": [2015, 2019], "test": [2020, 2026]},
+    # Contiguous is not sufficient on its own. A label looks horizon_days ahead,
+    # so 2014-12-31 carries the answer for 2015-01-03: the tail of train holds
+    # validation outcomes and the tail of val holds test outcomes. This many
+    # days come off the end of every split that another split follows.
+    # CRISK_EMBARGO=0 reproduces the leaky runs for comparison.
+    "embargo_days": int(os.environ.get("CRISK_EMBARGO", 3)),
     # Last year each hazard actually has labels for. NHC publishes a HURDAT2
     # season only once it is finalised, so the hurricane label trails the rain
     # record. build_daily.py prints the correct value when it builds the panel;
@@ -249,15 +286,21 @@ PARAMS = {
         "early": 5, "pos_weight": 50.0, "limit_train_batches": 0.25,
         # Window assembly is pure Python and runs per batch, so a single-process
         # loader starves the GPU: the smoke run was slower on a T4 than on a
-        # laptop CPU. Validation is capped too, because a full pass over 2015-2019
-        # costs more than the epoch it is scoring.
+        # laptop CPU.
         # Capped at the actual core count: a Colab CPU runtime has 2, and
         # oversubscribing makes the workers fight each other instead of feeding
         # the GPU. CRISK_WORKERS=0 falls back to in-process loading if an
         # environment's multiprocessing is broken; slow, but it finishes.
         "workers": int(os.environ.get("CRISK_WORKERS",
                                       min(4, (os.cpu_count() or 2)))),
-        "limit_val_batches": 0.2,
+        # Uncapped, even though validation then costs about a third of the
+        # epoch it scores. EarlyStopping reads this number to decide whether
+        # training continues, and on a 20% sample it was deciding on noise: one
+        # lucky low value early becomes a best that later real improvements
+        # cannot beat, so the fit stops short and underfitting is indistinguishable
+        # from a model that genuinely has no skill. The smoke run keeps a cap,
+        # where the point is only that the path executes.
+        "limit_val_batches": 1.0,
     },
 }
 
@@ -326,11 +369,22 @@ class _Tee:
     truncating the record of what already ran. stderr is left alone; note that
     Lightning's progress bar does not go there but to stdout, so it arrives
     here and is filtered out in write() rather than avoided.
+
+    The log is committed with the run, so absolute paths are rewritten on the
+    way to the file. Doing it here rather than at each print site is what makes
+    it hold: most of the paths that reach stdout come out of Lightning, Torch
+    and XGBoost, where there is no print statement to fix.
     """
 
     def __init__(self, stream, path):
         self.stream = stream
         self.fh = open(path, "a", buffering=1)
+        # Longest first: ROOT is usually inside the home directory, and
+        # replacing the home prefix first would leave the rest of the root
+        # unmatched.
+        self._scrub = sorted(
+            {str(ROOT.resolve()): ".", str(Path.home()): "~"}.items(),
+            key=lambda kv: -len(kv[0]))
 
     def write(self, s):
         self.stream.write(s)
@@ -339,6 +393,8 @@ class _Tee:
         # partial redraws that bury the results, so only real lines are kept
         # and the bar stays on screen where it is useful.
         if "\r" not in s:
+            for frm, to in self._scrub:
+                s = s.replace(frm, to)
             self.fh.write(s)
         return len(s)
 
@@ -394,14 +450,17 @@ RUN_T0 = time.time()
 # the archive records which parent a warm run descends from instead of leaving
 # the reader to guess why two runs on the same panel disagree.
 WARM_PARENTS = {}
+# Colab has no checkout; the notebook generator stamps the commit it was built
+# from into CRISK_GIT_COMMIT, and only when the tree was clean at generation.
+GIT_COMMIT = _git("rev-parse", "HEAD") or os.environ.get("CRISK_GIT_COMMIT", "")
 manifest_update(
     run_id=RUN_ID, tag=TAG, smoke=PARAMS["smoke"],
     started_utc=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    env=ENV, host=platform.node(), root=str(ROOT),
+    env=ENV, host=HOST, root=ROOT.name,
     # A result is only reproducible against the code that produced it, and the
     # dirty flag is the honest part: it says the working tree held edits that
     # the recorded commit does not contain.
-    git={"commit": _git("rev-parse", "HEAD"),
+    git={"commit": GIT_COMMIT,
          "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
          "dirty": bool(_git("status", "--porcelain"))},
     versions={"python": platform.python_version(), "numpy": np.__version__,
@@ -416,27 +475,51 @@ manifest_update(
 
 print(f"run   {RUN_ID}")
 print(f"env   {ENV}")
-print(f"root  {ROOT}")
-print(f"panel {PATHS['panel']}  exists={PATHS['panel'].exists()}")
+print(f"root  {ROOT.name}")
+print(f"panel {rel(PATHS['panel'])}  exists={PATHS['panel'].exists()}")
+# Whether a checkpoint is on disk, which is not the same question as whether
+# this run will continue one: warm_start is permission, and a checkpoint whose
+# layout differs is skipped by both fitters. This line read "warm-start ...
+# tft=True" on a run launched with CRISK_COLD=1, which is how the ledger came
+# to call a cold run warm.
 for h in PARAMS["hazards"]:
-    print(f"warm-start {h}: xgb={CKPT['xgb'][h].exists()}  "
+    print(f"checkpoint on disk {h}: xgb={CKPT['xgb'][h].exists()}  "
           f"tft={CKPT['tft'][h].exists()}")
-print(f"smoke {PARAMS['smoke']}  tag {TAG}")
+print(f"smoke {PARAMS['smoke']}  tag {TAG}  "
+      f"warm_start allowed={PARAMS['warm_start']}")
 
 
 # %% ==========================================================================
 # CELL 3 - load the panel and split it into partitions
 # =============================================================================
+import cyclone_features
+
 FEATS = [
     "prcp", "prcp_max_stn", "prcp_prev3", "prcp_prev7", "prcp_prev14",
     "prcp_prev30", "prcp_prev60", "prcp_prev90", "prcp_fwd1", "prcp_fwd3",
     "prcp_fwd3_max", "ratio_prev3", "ratio_fwd3", "ratio_prev30", "log_fwd3",
     "tmax", "tmin", "month_sin", "month_cos", "hurricane_season",
-    "lat", "lon", "pop_density", "RPL_THEME1", "RPL_THEME4", "RPL_THEMES",
+    "lat", "lon", "pop_density",
+    # Taken from the module that builds them, not copied, so the training
+    # layout and the scoring layout cannot drift apart silently.
+    *cyclone_features.FEATURES,
 ]
+# The CDC SVI themes used to sit in the list above. Whether a cyclone crosses a
+# county is not a function of its social vulnerability, so they described who
+# would be harmed by a hazard rather than whether the hazard was coming.
+# audit_variants.py measured the cost of removing them before they were
+# removed: flood AP 0.26334 -> 0.26190, storm 0.53857 -> 0.53294. pop_density
+# stays, but it is not innocent either -- dropping it costs flood 8.6%, which
+# is most likely the model scoring how reliably an episode gets reported.
 # More rain must never lower predicted risk. Without this the trees carve
 # non-monotone thresholds out of individual historical events.
 MONO_UP = {f for f in FEATS if f.startswith(("prcp", "ratio", "log"))}
+# A storm forecast to pass closer must never lower predicted risk either. The
+# cyclone distances are the only features here where the physical direction is
+# negative, so they get their own set rather than a sign flipped into MONO_UP.
+MONO_DOWN = {"cyc_dist_min", "cyc_dist1", "cyc_dist2", "cyc_dist3",
+             "cyc_cone_margin"}
+MONO = tuple(1 if f in MONO_UP else -1 if f in MONO_DOWN else 0 for f in FEATS)
 
 if not PATHS["panel"].exists():
     # On Colab the cause is almost always a wrong root rather than a missing
@@ -453,7 +536,9 @@ if not PATHS["panel"].exists():
         f"panel not found at {PATHS['panel']}{hint}\n"
         f"build it first:  CLIMATE_DATA_DIR={PATHS['data']} "
         f"CLIMATE_OUT_DIR={PATHS['artifacts']} "
-        f"PANEL_START={PARAMS['years']['train'][0]} python build_daily.py"
+        f"PANEL_START={PARAMS['years']['train'][0]} "
+        f"CRISK_CONE_YEARS={','.join(str(y) for y in PARAMS['years']['train'])} "
+        f"python build_daily.py"
     )
 
 panel = pd.read_parquet(PATHS["panel"])
@@ -465,7 +550,7 @@ panel["year"] = panel["DATE"].dt.year
 # NOAA build from the old two-label FEMA one at a glance.
 _pstat = PATHS["panel"].stat()
 manifest_update(panel={
-    "path": str(PATHS["panel"]), "bytes": _pstat.st_size,
+    "path": rel(PATHS["panel"]), "bytes": _pstat.st_size,
     "mtime_utc": datetime.fromtimestamp(_pstat.st_mtime, timezone.utc)
                          .isoformat(timespec="seconds"),
     "sha256": _sha256(PATHS["panel"]),
@@ -504,11 +589,31 @@ for h in PARAMS["hazards"]:
     for k in PARAMS["leads"]:
         panel[f"y_{h}_l{k}"] = g.shift(-k).fillna(0).astype("int8")
 
+# The shift above reached past the panel's last day and fillna(0) called those
+# days quiet. They are not quiet, they are unknown, and leaving them in hands
+# every negative-class metric rows whose answer has not happened yet.
+EMBARGO = max([PARAMS["embargo_days"], *PARAMS["leads"]]) if PARAMS["embargo_days"] else 0
+if EMBARGO:
+    panel = panel[panel["DATE"] <= panel["DATE"].max() - pd.Timedelta(days=EMBARGO)]
+
+# A row on day d carries labels for d+1..d+EMBARGO, so it belongs to the split
+# that owns all of them. Keeping d < (next split's first day - EMBARGO) is the
+# condition; with a three-day horizon train ends 2014-12-28, not 2014-12-31.
 yr = panel["year"]
-SPLIT = {k: panel[yr.between(*v)] for k, v in PARAMS["years"].items()}
+_blocks = sorted(PARAMS["years"].items(), key=lambda kv: kv[1][0])
+SPLIT = {}
+for i, (name, span) in enumerate(_blocks):
+    part = panel[yr.between(*span)]
+    if EMBARGO and i + 1 < len(_blocks):
+        part = part[part["DATE"] < pd.Timestamp(year=_blocks[i + 1][1][0], month=1, day=1)
+                    - pd.Timedelta(days=EMBARGO)]
+    SPLIT[name] = part
 for name, part in SPLIT.items():
     if part.empty:
         raise SystemExit(f"{name} split is empty -- check PARAMS['years']")
+print("splits  " + "  ".join(
+    f"{n}={len(p):,} ({p['DATE'].min():%Y-%m-%d}..{p['DATE'].max():%Y-%m-%d})"
+    for n, p in SPLIT.items()) + f"   embargo={EMBARGO}d")
 
 # HURDAT2 only publishes a season after NHC finalises it, so the hurricane
 # label stops short of the panel's last year. Those years hold no positives by
@@ -564,7 +669,7 @@ ax.legend(frameon=False)
 fig.tight_layout()
 fig.savefig(PATHS["plots"] / f"split_{TAG}.png", dpi=130)
 plt.close(fig)
-print(f"wrote {PATHS['plots'] / f'split_{TAG}.png'}")
+print(f"wrote {rel(PATHS['plots'] / f'split_{TAG}.png')}")
 
 
 # %% ==========================================================================
@@ -577,7 +682,7 @@ def xgb_fit(haz):
         max_depth=p["max_depth"], min_child_weight=p["min_child_weight"],
         subsample=p["subsample"], colsample_bytree=p["colsample_bytree"],
         reg_lambda=p["reg_lambda"],
-        monotone_constraints=tuple(1 if f in MONO_UP else 0 for f in FEATS),
+        monotone_constraints=MONO,
         eval_metric="aucpr", early_stopping_rounds=p["early"],
         tree_method="hist", n_jobs=int(os.environ.get("SLURM_CPUS_PER_TASK", 0)) or None,
         random_state=PARAMS["seed"],
@@ -639,7 +744,16 @@ plt.close(fig)
 # CELL 5 - XGBoost validation and test, against Tier-0 baselines
 # =============================================================================
 BASELINE_FEATS = ("ratio_fwd3", "prcp_fwd3", "prcp_fwd3_max", "prcp_prev30",
-                  "ratio_prev3", "log_fwd3", "pop_density")
+                  "ratio_prev3", "log_fwd3", "pop_density",
+                  "cyc_dist2", "cyc_dist_min", "cyc_in34", "cyc_cone_margin")
+
+# Distance-like features: lower means closer to the storm, so riskier. Scored
+# negated, with NaN (no active storm) ranked below every real value. fillna(0)
+# would be catastrophic here -- 0 km means the storm is overhead, so every
+# quiet day would rank as a direct hit (measured: cyc_dist2 AP drops from
+# 0.317 to 0.009). The sentinel is nanmin-1 rather than -inf because sklearn's
+# average_precision_score rejects non-finite scores.
+BASELINE_INVERT = {"cyc_dist2", "cyc_dist_min", "cyc_cone_margin"}
 
 
 def baselines(haz):
@@ -649,8 +763,13 @@ def baselines(haz):
     out = {"constant_prevalence": float(average_precision_score(
         y, np.full(len(y), tr[f"y_{haz}"].mean())))}
     for f in BASELINE_FEATS:
-        out[f"single_{f}"] = float(average_precision_score(
-            y, te[f].replace([np.inf, -np.inf], np.nan).fillna(0).to_numpy()))
+        s = te[f].replace([np.inf, -np.inf], np.nan)
+        if f in BASELINE_INVERT:
+            s = -s
+            s = s.fillna((s.min() if s.notna().any() else 0.0) - 1.0)
+        else:
+            s = s.fillna(0)
+        out[f"single_{f}"] = float(average_precision_score(y, s.to_numpy()))
     rate = tr.groupby(tr["DATE"].dt.month)[f"y_{haz}"].mean()
     out["month_climatology"] = float(average_precision_score(
         y, te["DATE"].dt.month.map(rate).fillna(tr[f"y_{haz}"].mean()).to_numpy()))
@@ -719,19 +838,28 @@ fig.tight_layout()
 fig.savefig(PATHS["plots"] / f"xgb_eval_{TAG}.png", dpi=130)
 plt.close(fig)
 (PATHS["results"] / f"xgb_{TAG}.json").write_text(json.dumps(XGB_RESULT, indent=2))
-print(f"wrote {PATHS['results'] / f'xgb_{TAG}.json'}")
+print(f"wrote {rel(PATHS['results'] / f'xgb_{TAG}.json')}")
 
 
 # %% ==========================================================================
 # CELL 6 - TFT training (resumed from the saved checkpoint if present)
 # =============================================================================
 TFT_KNOWN = ["prcp_fwd1", "prcp_fwd3", "prcp_fwd3_max", "ratio_fwd3",
-             "log_fwd3", "month_sin", "month_cos", "hurricane_season"]
+             "log_fwd3", "month_sin", "month_cos", "hurricane_season",
+             # The cyclone block. Known rather than unknown because every value
+             # in it is read off the advisory in force at the origin, so a row
+             # at time t carries only what a forecaster had at t -- the same
+             # reason it is train-equivalent on the XGBoost side.
+             #
+             # Omitting it is what left this architecture 21 features behind
+             # the booster it is compared against, and on hurricane that is the
+             # difference between AP 0.15570 and 0.53294. A transformer scored
+             # without it would be losing a comparison it was never entered in.
+             *cyclone_features.FEATURES]
 TFT_UNKNOWN = ["prcp", "prcp_max_stn", "prcp_prev3", "prcp_prev7",
                "prcp_prev14", "prcp_prev30", "prcp_prev60", "prcp_prev90",
                "ratio_prev3", "ratio_prev30", "tmax", "tmin"]
-TFT_STATIC = ["lat", "lon", "pop_density", "RPL_THEME1", "RPL_THEME4",
-              "RPL_THEMES"]
+TFT_STATIC = ["lat", "lon", "pop_density"]
 
 # TFT / TFT_DS / TFT_HIST are initialised in cell 1. Re-running this cell
 # clears them so a partial previous attempt cannot be mistaken for a result.
@@ -768,6 +896,11 @@ def tft_frame(haz):
     cap = LABEL_END.get(base_haz(haz))
     if cap is not None:
         d = d[d["year"] <= cap]
+    # Cyclone nulls first, and separately: the blanket fillna below is right
+    # for a rainfall total, where a null is a gauge that reported nothing, and
+    # wrong for a distance, where 0 is a storm directly overhead. See
+    # cyclone_features.NEURAL_FILL.
+    d = cyclone_features.fill_dense(d)
     d[TFT_KNOWN + TFT_UNKNOWN + TFT_STATIC] = (
         d[TFT_KNOWN + TFT_UNKNOWN + TFT_STATIC]
         .replace([np.inf, -np.inf], np.nan).fillna(0.0).astype("float32"))
@@ -808,8 +941,83 @@ def tft_datasets(d):
     return {"train": train, **others}
 
 
+class ValAP(pl.Callback):
+    """Log validation average precision each epoch as `val_ap`.
+
+    This exists so the transformer is selected on the metric it is judged on.
+    XGBoost early-stops on `aucpr`, so its reported booster is the one that
+    ranked best; the transformer was early-stopped and checkpointed on weighted
+    cross-entropy, which rewards calibration instead. That made the headline
+    comparison partly a comparison of two selection rules, and the symptom fit:
+    on storm the transformer beat the booster on ECE (0.000190 vs 0.002655) and
+    on Brier while still losing on AP.
+
+    tft_colab.py attacks the same problem by keeping every epoch
+    (`save_top_k=-1`) and scoring each checkpoint afterwards. That is the right
+    trade there, where `limit_val_batches` is a subsample and an in-epoch number
+    would be too noisy to select on. A full run here sets limit_val_batches=1.0,
+    so the in-epoch AP covers the whole validation split and is the same
+    quantity the post-hoc pass would produce -- while costing nothing extra,
+    leaving no checkpoints to clean up, and letting EarlyStopping stop on AP
+    rather than only shifting which saved epoch gets picked. A smoke run keeps
+    a 0.1 subsample, which is fine because it is checking the plumbing and its
+    checkpoints are tagged so they cannot be served.
+
+    Selecting on the uncalibrated probability is not a shortcut. Cell 8 fits
+    isotonic regression on validation before reporting, and isotonic is
+    monotone, so it cannot change the ordering AP measures.
+
+    Predictions come from a forward hook, not from `outputs`:
+    `BaseModel.validation_step` computes `log, out = self.step(...)` but returns
+    only `log`, so the raw prediction never reaches a callback. The alternative
+    is a second predict() pass per epoch, which doubles validation cost.
+    """
+
+    def __init__(self):
+        self.hook = None
+        self.latest = None
+        self.p, self.y = [], []
+
+    def on_validation_start(self, trainer, module):
+        def grab(_module, _inputs, out):
+            self.latest = out["prediction"].detach()
+        self.hook = module.register_forward_hook(grab)
+
+    def on_validation_end(self, trainer, module):
+        if self.hook is not None:
+            self.hook.remove()
+            self.hook = None
+
+    def on_validation_epoch_start(self, trainer, module):
+        self.p, self.y = [], []
+        self.latest = None
+
+    def on_validation_batch_end(self, trainer, module, outputs, batch,
+                                batch_idx, dataloader_idx=0):
+        # One slot, cleared on read: a stale tensor here would pair one batch's
+        # predictions with the next batch's labels, which scores as noise.
+        logits, self.latest = self.latest, None
+        if logits is None:
+            return
+        p = torch.softmax(logits[:, 0, :], dim=-1)[:, 1]
+        self.p.append(p.float().cpu().numpy().ravel())
+        self.y.append(batch[1][0].detach().cpu().numpy().ravel())
+
+    def on_validation_epoch_end(self, trainer, module):
+        if not self.p:
+            return
+        y, p = np.concatenate(self.y), np.concatenate(self.p)
+        # A sanity-check pass, or any slice with one class present, has no
+        # defined average precision. 0.0 never wins against a real epoch, so
+        # logging it keeps the monitored key present without being selectable.
+        ap = float(average_precision_score(y, p)) if y.min() != y.max() else 0.0
+        # Logged here rather than in on_validation_end, because EarlyStopping
+        # and ModelCheckpoint read callback_metrics in on_validation_end.
+        module.log("val_ap", ap, prog_bar=False)
+
+
 class EpochLine(pl.Callback):
-    """One durable line per epoch: which epoch, the loss, how close to stopping.
+    """One durable line per epoch: which epoch, the score, how close to stopping.
 
     The progress bar answers "is it alive" but is filtered out of console.log,
     and max_epochs is only a ceiling because early stopping decides the real
@@ -822,6 +1030,11 @@ class EpochLine(pl.Callback):
     an epoch that had already regressed. Only `patience` is read from it, which
     is a constant. Mirrors EarlyStopping's default min_delta=0, i.e. ties count
     as no improvement.
+
+    Tracks val_ap with max semantics, matching what EarlyStopping now monitors;
+    val_loss is still printed because a rising AP alongside a rising loss is the
+    normal shape of this fit, and seeing both is what distinguishes it from a
+    diverging one.
     """
 
     def __init__(self):
@@ -831,19 +1044,21 @@ class EpochLine(pl.Callback):
     def on_validation_end(self, trainer, module):
         if trainer.sanity_checking:
             return
-        vl = trainer.callback_metrics.get("val_loss")
-        if vl is None:
+        ap = trainer.callback_metrics.get("val_ap")
+        if ap is None:
             return
-        vl = float(vl)
-        if self.best is None or vl < self.best:
-            self.best, self.wait = vl, 0
+        ap = float(ap)
+        if self.best is None or ap > self.best:
+            self.best, self.wait = ap, 0
         else:
             self.wait += 1
         es = next((c for c in trainer.callbacks
                    if isinstance(c, EarlyStopping)), None)
         tail = f"  stop_in={es.patience - self.wait}" if es else ""
+        vl = trainer.callback_metrics.get("val_loss")
+        loss = f"  val_loss={float(vl):.5f}" if vl is not None else ""
         print(f"    epoch {trainer.current_epoch + 1}/{trainer.max_epochs}"
-              f"  val_loss={vl:.5f}  best={self.best:.5f}{tail}")
+              f"  val_ap={ap:.5f}  best={self.best:.5f}{loss}{tail}")
 
 
 def tft_fit(haz):
@@ -869,35 +1084,54 @@ def tft_fit(haz):
 
     prior = CKPT["tft"][haz]
     if PARAMS["warm_start"] and prior.exists():
-        # strict=False forgives missing and unexpected keys but NOT shape
-        # mismatches on keys that are present, so a checkpoint whose county set
-        # or hidden size differs raises instead of partially loading. Drop the
-        # tensors that cannot be copied and keep the rest.
         sd = torch.load(prior, map_location="cpu", weights_only=False)
         sd = sd.get("state_dict", sd)
         cur = model.state_dict()
+        # A shape mismatch on a tensor the current model has means the input
+        # layout changed -- a different feature count, county set or hidden
+        # size. This used to filter those tensors out and load the rest, which
+        # made the partial load *succeed*: the encoder would resume from
+        # weights fitted against the old layout with the new inputs randomly
+        # initialised. That is what discarded run 20261104T015759Z, and adding
+        # the 21-column cyclone block is exactly the change that triggers it.
+        #
+        # So the rule here is the one xgb_fit already applies: a checkpoint
+        # whose layout differs is not a warm start, it is a cold one.
+        bad = sorted(k for k, v in sd.items()
+                     if k in cur and cur[k].shape != v.shape)
         fit = {k: v for k, v in sd.items()
                if k in cur and cur[k].shape == v.shape}
-        dropped = len(sd) - len(fit)
-        if not fit:
+        if bad:
+            print(f"  {prior.name} has {len(bad)} tensor(s) of a different "
+                  f"shape ({bad[0]}: {tuple(sd[bad[0]].shape)} vs "
+                  f"{tuple(cur[bad[0]].shape)}) -- layout changed, cold start")
+        elif not fit:
             print(f"  {prior.name} is a different architecture entirely; "
                   f"cold start")
         else:
             got = model.load_state_dict(fit, strict=False)
             WARM_PARENTS[f"tft:{haz}"] = {
                 "file": prior.name, "sha256": _sha256(prior),
-                "tensors_loaded": len(fit), "tensors_dropped": dropped}
+                "tensors_loaded": len(fit),
+                "tensors_absent": len(sd) - len(fit)}
             print(f"  warm start from {prior.name} (loaded={len(fit)} "
-                  f"shape-mismatch={dropped} missing={len(got.missing_keys)})")
+                  f"absent={len(sd) - len(fit)} "
+                  f"missing={len(got.missing_keys)})")
 
     ckpt_cb = ModelCheckpoint(dirpath=PATHS["scratch"], filename=f"tft_{haz}_best",
-                              monitor="val_loss", mode="min", save_top_k=1)
+                              monitor="val_ap", mode="max", save_top_k=1)
     trainer = pl.Trainer(
         max_epochs=p["epochs"], accelerator="auto", devices=1,
         gradient_clip_val=0.1, limit_train_batches=p["limit_train_batches"],
         limit_val_batches=p["limit_val_batches"],
-        callbacks=[EarlyStopping(monitor="val_loss", patience=p["early"],
-                                 mode="min"), ckpt_cb, EpochLine()],
+        # ValAP must precede the two callbacks that read val_ap. Lightning runs
+        # on_validation_epoch_end for every callback before any
+        # on_validation_end, so the metric is in callback_metrics regardless of
+        # order -- but nothing documents that guarantee, and the failure mode is
+        # a MisconfigurationException on a missing monitor key mid-fit.
+        callbacks=[ValAP(),
+                   EarlyStopping(monitor="val_ap", patience=p["early"],
+                                 mode="max"), ckpt_cb, EpochLine()],
         # On Colab a fit is 45+ minutes of total silence without this, with no
         # way to tell a live run from a hung one: cells queue, so no second cell
         # can poll while this one holds the kernel. _Tee keeps the redraw frames
@@ -914,8 +1148,31 @@ def tft_fit(haz):
     best = Path(ckpt_cb.best_model_path or "")
     if best.exists():
         model = TemporalFusionTransformer.load_from_checkpoint(best)
+        # Lightning serialises the checkpoint callback's own state, which holds
+        # four absolute scratch paths: dirpath, best_model_path,
+        # kth_best_model_path and the keys of best_k_models. They name the
+        # machine that did the training, so a published .ckpt carries the
+        # operator's home directory inside it -- invisible to `git grep`, which
+        # skips binary blobs. Blanked between reading `best` above and the save
+        # below, so the load still resolves and the written file does not.
+        #
+        # Not a cosmetic fix: these are the paths of a scratch directory that
+        # will not exist on the machine that later reads the checkpoint, so
+        # they are wrong as well as disclosing.
+        ckpt_cb.dirpath = None
+        ckpt_cb.best_model_path = ""
+        ckpt_cb.kth_best_model_path = ""
+        ckpt_cb.last_model_path = ""
+        ckpt_cb.best_k_models = {}
         trainer.save_checkpoint(prior)
-    TFT_HIST[haz] = {"val_loss": float(ckpt_cb.best_model_score or float("nan")),
+    # The loss curve is not lost by recording AP instead: CSVLogger writes
+    # every epoch's val_loss and val_ap to tft_logs/<haz>/metrics.csv.
+    #
+    # Checked against None rather than `or nan`: an AP of exactly 0.0 is a real
+    # score this callback can emit (a validation slice with one class present),
+    # and it is falsy, so `or` would silently report it as nan.
+    bms = ckpt_cb.best_model_score
+    TFT_HIST[haz] = {"val_ap": float("nan") if bms is None else float(bms),
                      "epochs_run": trainer.current_epoch}
     return model
 
@@ -926,7 +1183,7 @@ if HAVE_TORCH:
         t0 = time.time()
         TFT[haz] = tft_fit(haz)
         print(f"  epochs={TFT_HIST[haz]['epochs_run']}  "
-              f"best_val_loss={TFT_HIST[haz]['val_loss']:.5f}  "
+              f"best_val_ap={TFT_HIST[haz]['val_ap']:.5f}  "
               f"{time.time() - t0:.1f}s  -> {CKPT['tft'][haz].name}")
 else:
     print(f"skipped: {TFT_SKIP_REASON}")
@@ -977,7 +1234,7 @@ if HAVE_TORCH and TFT:
              "val": score(yv, pv), "test": score(yt, pt),
              "best_baseline": best, "best_baseline_ap": base[best],
              "epochs_run": TFT_HIST[haz]["epochs_run"],
-             "best_val_loss": TFT_HIST[haz]["val_loss"],
+             "best_val_ap": TFT_HIST[haz]["val_ap"],
              "n_test_pos": int(yt.sum()), "n_test_windows": int(len(yt)),
              "calibration": {
                  "method": "isotonic_on_val",
@@ -1019,7 +1276,7 @@ if HAVE_TORCH and TFT:
     plt.close(fig)
     (PATHS["results"] / f"tft_{TAG}.json").write_text(
         json.dumps(TFT_RESULT, indent=2))
-    print(f"wrote {PATHS['results'] / f'tft_{TAG}.json'}")
+    print(f"wrote {rel(PATHS['results'] / f'tft_{TAG}.json')}")
 else:
     print("skipped: no trained TFT")
 
@@ -1207,7 +1464,7 @@ fig.tight_layout()
 fig.savefig(PATHS["plots"] / f"compare_{TAG}.png", dpi=130)
 plt.close(fig)
 
-final = {"tag": TAG, "env": ENV, "host": platform.node(),
+final = {"tag": TAG, "env": ENV, "host": HOST,
          "params": PARAMS, "splits": split_table.to_dict("records"),
          "summary": summary.to_dict("records"),
          "deviation": {h: t.to_dict() for h, t in DEVIATION.items()},
@@ -1216,8 +1473,8 @@ out = PATHS["results"] / f"results_{TAG}.json"
 out.write_text(json.dumps(final, indent=2, default=str))
 summary.to_csv(PATHS["results"] / f"summary_{TAG}.csv", index=False)
 
-print(f"\nwrote {out}")
-print(f"plots in {PATHS['plots']}")
+print(f"\nwrote {rel(out)}")
+print(f"plots in {rel(PATHS['plots'])}")
 for f in sorted(PATHS["plots"].glob(f"*_{TAG}.png")):
     print(f"  {f.name}")
 
@@ -1231,6 +1488,16 @@ for f in sorted(PATHS["plots"].glob(f"*_{TAG}.png")):
 # per hazard, so six of them does not fit a session, and the decay shape being
 # asked about is a property of atmospheric predictability, not of the
 # architecture. A flat curve here would mean the label leaks the present.
+#
+# Each lead model keeps the full feature list, because everything in FEATS is
+# knowable at the origin day for every lead here: backward windows and day-t
+# observations precede the origin, the cyclone block comes from the a-deck
+# advisory issued before day t begins (see cyclone_features.py), and the fwd
+# rain family describes t+1..t+3, within the horizon of a forecast issued at
+# t -- which is exactly what serves those features live. Training them on
+# observed rain overstates forecast *quality*, not availability, and that gap
+# is measured by audit_forecast_rain.py rather than hidden by dropping the
+# features.
 LEAD_RESULT, lead_rows = {}, []
 
 
@@ -1310,8 +1577,8 @@ plt.close(fig)
 lead_table.to_csv(PATHS["results"] / f"leads_{TAG}.csv", index=False)
 (PATHS["results"] / f"leads_{TAG}.json").write_text(
     json.dumps(LEAD_RESULT, indent=2, default=str))
-print(f"\nwrote {PATHS['results'] / f'leads_{TAG}.csv'}")
-print(f"wrote {PATHS['plots'] / f'lead_{TAG}.png'}")
+print(f"\nwrote {rel(PATHS['results'] / f'leads_{TAG}.csv')}")
+print(f"wrote {rel(PATHS['plots'] / f'lead_{TAG}.png')}")
 
 
 # %% ==========================================================================
@@ -1357,7 +1624,7 @@ else:
             t0 = time.time()
             TFT[key] = tft_fit(key)
             print(f"  epochs={TFT_HIST[key]['epochs_run']}  "
-                  f"best_val_loss={TFT_HIST[key]['val_loss']:.5f}  "
+                  f"best_val_ap={TFT_HIST[key]['val_ap']:.5f}  "
                   f"{time.time() - t0:.1f}s")
 
             vf, tf = tft_score(key, "val"), tft_score(key, "test")
@@ -1377,7 +1644,7 @@ else:
                  "val": score(yv, pv), "test": score(yt, pt),
                  "best_baseline": best, "best_baseline_ap": base[best],
                  "epochs_run": TFT_HIST[key]["epochs_run"],
-                 "best_val_loss": TFT_HIST[key]["val_loss"],
+                 "best_val_ap": TFT_HIST[key]["val_ap"],
                  "n_test_pos": int(yt.sum()), "n_test_windows": int(len(yt)),
                  "fit_seconds": round(time.time() - t0, 1),
                  "calibration": {
@@ -1457,8 +1724,8 @@ else:
     lead_both.to_csv(PATHS["results"] / f"leads_both_{TAG}.csv", index=False)
     (PATHS["results"] / f"tft_leads_{TAG}.json").write_text(
         json.dumps(TFT_LEAD_RESULT, indent=2, default=str))
-    print(f"\nwrote {PATHS['results'] / f'leads_both_{TAG}.csv'}")
-    print(f"wrote {PATHS['plots'] / f'lead_both_{TAG}.png'}")
+    print(f"\nwrote {rel(PATHS['results'] / f'leads_both_{TAG}.csv')}")
+    print(f"wrote {rel(PATHS['plots'] / f'lead_both_{TAG}.png')}")
 
 
 # %% ==========================================================================
@@ -1492,7 +1759,9 @@ final_manifest = manifest_update(
                             for k, r in TFT_LEAD_RESULT.items()}},
     models=model_files, inventory=inventory,
     warm_parents=WARM_PARENTS,
-    self_contained=not WARM_PARENTS)
+    # A run with no recorded commit cannot be reproduced against its code no
+    # matter how cold the start was, so it does not get to claim the label.
+    self_contained=bool(GIT_COMMIT) and not WARM_PARENTS)
 
 if RUN_SEAL_TO is not None:
     # One zip, written once, then hashed on both sides. A mismatch or a missing
@@ -1514,13 +1783,16 @@ if RUN_SEAL_TO is not None:
               f"(want {want[:12]}, got {got and got[:12]}).")
         print(f"Download it from the Colab file browser instead: {local_zip}")
 
-print(f"\n=== run sealed: {RUN_DIR} ===")
+print(f"\n=== run sealed: {rel(RUN_DIR)} ===")
 print(f"wall {final_manifest['wall_seconds']}s   "
       f"{len(inventory)} files   git {final_manifest['git']['commit'][:8] or 'n/a'}"
       f"{' (dirty)' if final_manifest['git']['dirty'] else ''}")
 if WARM_PARENTS:
     print(f"NOT self-contained: warm-started from {len(WARM_PARENTS)} prior "
           f"checkpoint(s). Re-run with CRISK_COLD=1 to report these numbers.")
+elif not GIT_COMMIT:
+    print("NOT self-contained: no git commit recorded, so the code that "
+          "produced this run cannot be recovered from the manifest.")
 else:
     print("cold start: reproducible from this directory and the panel hash alone")
 for f in inventory:

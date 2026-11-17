@@ -10,21 +10,31 @@
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.out
 
-# Run once. Builds the conda env on a compute node, because the cluster policy
-# forbids running code on the login node and a conda solve is not free.
+# Run once. CREST ships no conda module, so this bootstraps Miniforge into
+# /work/gpinnu and builds the env there. Runs on a compute node because the
+# cluster policy forbids real work on the login node; compute nodes have
+# internet egress (verified), so downloads work in-job.
 #
-# CPU torch by default: ~200 MB instead of ~2.5 GB, and /home is the only
-# storage available until /work/gpinnu exists. Re-run with CRISK_TORCH=cu121
-# once GPU QOS is granted.
+# cu121 torch by default: the gpu partition has H100s, and a CUDA build still
+# runs fine on CPU nodes (cuda.is_available() just returns False).
 
 set -euo pipefail
 
-CRISK_ENV="${CRISK_ENV:-$HOME/.conda/envs/crisk}"
-CRISK_TORCH="${CRISK_TORCH:-cpu}"
+CRISK_WORK="${CRISK_WORK:-/work/gpinnu}"
+CRISK_CONDA="${CRISK_CONDA:-$CRISK_WORK/miniforge3}"
+CRISK_ENV="${CRISK_ENV:-$CRISK_WORK/envs/crisk}"
+CRISK_TORCH="${CRISK_TORCH:-cu121}"
 
-module purge
-module load miniconda3/24.1.2
-source "$(conda info --base)/etc/profile.d/conda.sh"
+if [ ! -x "$CRISK_CONDA/bin/conda" ]; then
+  echo "=== installing Miniforge to $CRISK_CONDA ==="
+  installer="$CRISK_WORK/miniforge-installer.sh"
+  curl -fsSL -o "$installer" \
+    "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"
+  bash "$installer" -b -p "$CRISK_CONDA"
+  rm -f "$installer"
+fi
+
+source "$CRISK_CONDA/etc/profile.d/conda.sh"
 
 if [ -d "$CRISK_ENV" ]; then
   echo "env already exists at $CRISK_ENV"

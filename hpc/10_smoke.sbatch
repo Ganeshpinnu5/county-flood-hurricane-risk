@@ -14,7 +14,7 @@
 # on a deliberately small slice. The point is to prove the plumbing; the AP
 # numbers it prints are expected to be poor.
 
-export CRISK_ROOT="${CRISK_ROOT:-$HOME/crisk}"
+export CRISK_ROOT="${CRISK_ROOT:-/work/gpinnu/crisk}"
 source "$CRISK_ROOT/hpc/env.sh"
 
 export CLIMATE_DATA_DIR="$CRISK_ROOT/data"

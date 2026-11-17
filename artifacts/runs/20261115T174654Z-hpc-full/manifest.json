@@ -1,0 +1,302 @@
+{
+  "run_id": "20261115T174654Z-hpc-full",
+  "tag": "hpc-full",
+  "smoke": false,
+  "started_utc": "2026-11-15T17:46:55+00:00",
+  "env": "hpc",
+  "host": "crest-g002",
+  "root": "crisk",
+  "git": {
+    "commit": "b5a23ed38e7ce7194c8f804865d9dcaf6eaa7e29",
+    "branch": "",
+    "dirty": false
+  },
+  "versions": {
+    "python": "3.11.18",
+    "numpy": "2.1.3",
+    "pandas": "2.3.3",
+    "xgboost": "3.2.0",
+    "torch": "2.5.1+cu121",
+    "cuda": "NVIDIA H100 NVL"
+  },
+  "tft_skipped": null,
+  "params": {
+    "tag": "hpc-full",
+    "smoke": false,
+    "seed": 0,
+    "hazards": [
+      "flood",
+      "storm"
+    ],
+    "horizon_days": 3,
+    "leads": [
+      1,
+      2,
+      3
+    ],
+    "years": {
+      "train": [
+        2000,
+        2014
+      ],
+      "val": [
+        2015,
+        2019
+      ],
+      "test": [
+        2020,
+        2026
+      ]
+    },
+    "embargo_days": 3,
+    "label_end": {
+      "storm": 2024
+    },
+    "counties": 0,
+    "warm_start": false,
+    "xgb": {
+      "rounds": 2000,
+      "early": 50,
+      "lr": 0.05,
+      "max_depth": 6,
+      "min_child_weight": 50,
+      "subsample": 0.9,
+      "colsample_bytree": 0.9,
+      "reg_lambda": 5.0
+    },
+    "tft": {
+      "encoder_days": 30,
+      "hidden": 32,
+      "heads": 4,
+      "dropout": 0.2,
+      "hidden_continuous": 16,
+      "lr": 0.01,
+      "epochs": 30,
+      "batch": 512,
+      "early": 5,
+      "pos_weight": 50.0,
+      "limit_train_batches": 0.25,
+      "workers": 4,
+      "limit_val_batches": 1.0
+    }
+  },
+  "panel": {
+    "path": "artifacts/daily_panel.parquet",
+    "bytes": 128709061,
+    "mtime_utc": "2026-11-07T20:20:26+00:00",
+    "sha256": "b7455bfdbfeef7e64def525657302b01e50e3c83fef405a256f417219985ba92",
+    "rows_as_read": 3252826,
+    "counties_as_read": 356,
+    "years_as_read": [
+      2000,
+      2026
+    ],
+    "label_columns": [
+      "y_fema_flood",
+      "y_fema_storm",
+      "y_flood",
+      "y_storm",
+      "y_storm50",
+      "y_storm64"
+    ],
+    "onset_columns": [
+      "fema_flood_onset",
+      "fema_storm_onset",
+      "flood_onset",
+      "storm50_onset",
+      "storm64_onset",
+      "storm_onset"
+    ]
+  },
+  "splits": [
+    {
+      "split": "train",
+      "years": "2000-2014",
+      "rows": 1866781,
+      "counties": 356,
+      "flood_pos": 20734,
+      "flood_rate%": 1.1107,
+      "storm_pos": 4303,
+      "storm_rate%": 0.2305
+    },
+    {
+      "split": "val",
+      "years": "2015-2019",
+      "rows": 618985,
+      "counties": 354,
+      "flood_pos": 7129,
+      "flood_rate%": 1.1517,
+      "storm_pos": 1599,
+      "storm_rate%": 0.2583
+    },
+    {
+      "split": "test",
+      "years": "2020-2026",
+      "rows": 764238,
+      "counties": 356,
+      "flood_pos": 8020,
+      "flood_rate%": 1.0494,
+      "storm_pos": 2246,
+      "storm_rate%": 0.3837
+    }
+  ],
+  "lead_targets": [
+    "y_flood_l1",
+    "y_flood_l2",
+    "y_flood_l3",
+    "y_storm_l1",
+    "y_storm_l2",
+    "y_storm_l3"
+  ],
+  "finished_utc": "2026-11-16T16:51:04+00:00",
+  "wall_seconds": 83049.1,
+  "headline": {
+    "xgboost": {
+      "flood": 0.265,
+      "storm": 0.54115
+    },
+    "tft": {
+      "flood": 0.20051,
+      "storm": 0.39966
+    },
+    "xgb_leads": {
+      "flood_l1": 0.17801,
+      "flood_l2": 0.13004,
+      "flood_l3": 0.07768,
+      "storm_l1": 0.48286,
+      "storm_l2": 0.39148,
+      "storm_l3": 0.21687
+    },
+    "tft_leads": {
+      "flood_l1": 0.11781,
+      "flood_l2": 0.14895,
+      "flood_l3": 0.0668,
+      "storm_l1": 0.30958,
+      "storm_l2": 0.24179,
+      "storm_l3": 0.13257
+    }
+  },
+  "models": {
+    "xgb_flood_hpc-full.json": {
+      "sha256": "cd72302c2fad9fc9832f6545ce7a3fde0386a6d713ad93f25deb7e17d6a205c1",
+      "bytes": 990726
+    },
+    "xgb_storm_hpc-full.json": {
+      "sha256": "28efbe97643d9f9503e8e2710d96481f01ff4559547b07fbecf485775f310b3c",
+      "bytes": 188962
+    },
+    "xgb_flood_l1_hpc-full.json": {
+      "sha256": "bbfe7ca9a30f13de2dfa97bc84dbae782188de5701e1656516691dd892f34c0b",
+      "bytes": 779730
+    },
+    "xgb_flood_l2_hpc-full.json": {
+      "sha256": "9214038938f13433668aa8a955635e6517adc66005287dd44d801f4e1317a9d6",
+      "bytes": 439348
+    },
+    "xgb_flood_l3_hpc-full.json": {
+      "sha256": "fd19894b4fad3783e14c5528dde33405cee843d15ce85c0208546cf69f092805",
+      "bytes": 640695
+    },
+    "xgb_storm_l1_hpc-full.json": {
+      "sha256": "74e8b771dbc31069be88c4426ce7f2e8d9bcc265a9893cdaf31be741e056554f",
+      "bytes": 117978
+    },
+    "xgb_storm_l2_hpc-full.json": {
+      "sha256": "1344dc8b86a0e8a4e7d27754ee6674d6409442aaa25683f1118231794505d55e",
+      "bytes": 520039
+    },
+    "xgb_storm_l3_hpc-full.json": {
+      "sha256": "278bfbd5a25dc131da351b295c24fa764f4a876758294980314e6af4d6bf83af",
+      "bytes": 119750
+    },
+    "tft_flood_hpc-full.ckpt": {
+      "sha256": "361254a8a17e2bf1d71b43b13fb9e62fb812d785bca08a290a5b51f84e372d21",
+      "bytes": 4351327
+    },
+    "tft_storm_hpc-full.ckpt": {
+      "sha256": "a0fb83282968c730df93bced60e4bc6cacbacadcd23d310062569bbb449c09d8",
+      "bytes": 4351327
+    },
+    "tft_flood_l1_hpc-full.ckpt": {
+      "sha256": "327a755361f6a487677df41a89b4a9493a33ddcb80818a4e82ac70850549b1a9",
+      "bytes": 4351327
+    },
+    "tft_flood_l2_hpc-full.ckpt": {
+      "sha256": "fda0bc8de87d0caa1a6a2c2a5811ca5d7c03539170cd15f0d9b558f8c6b20271",
+      "bytes": 4351327
+    },
+    "tft_flood_l3_hpc-full.ckpt": {
+      "sha256": "c65c7bfccac66da4e930bcd6040156736e5fda92f1cf0dbd6ff2d4d4258375d8",
+      "bytes": 4351327
+    },
+    "tft_storm_l1_hpc-full.ckpt": {
+      "sha256": "e5b104f09dcad4f9daa95ba374ece9631b4b476111e9e71eebb121958c02297a",
+      "bytes": 4351327
+    },
+    "tft_storm_l2_hpc-full.ckpt": {
+      "sha256": "0fba83fee4d330983e2d54768ec3b7b4df4f287401830d1795ff64fa132d8f19",
+      "bytes": 4351327
+    },
+    "tft_storm_l3_hpc-full.ckpt": {
+      "sha256": "f7dc337c1749da380382f01e3118812c10dc803da6a5eab751ca57f168e27304",
+      "bytes": 4351327
+    }
+  },
+  "inventory": [
+    "console.log",
+    "manifest.json",
+    "models/tft_flood_hpc-full.ckpt",
+    "models/tft_flood_l1_hpc-full.ckpt",
+    "models/tft_flood_l2_hpc-full.ckpt",
+    "models/tft_flood_l3_hpc-full.ckpt",
+    "models/tft_storm_hpc-full.ckpt",
+    "models/tft_storm_l1_hpc-full.ckpt",
+    "models/tft_storm_l2_hpc-full.ckpt",
+    "models/tft_storm_l3_hpc-full.ckpt",
+    "models/xgb_flood_hpc-full.json",
+    "models/xgb_flood_l1_hpc-full.json",
+    "models/xgb_flood_l2_hpc-full.json",
+    "models/xgb_flood_l3_hpc-full.json",
+    "models/xgb_storm_hpc-full.json",
+    "models/xgb_storm_l1_hpc-full.json",
+    "models/xgb_storm_l2_hpc-full.json",
+    "models/xgb_storm_l3_hpc-full.json",
+    "plots/compare_hpc-full.png",
+    "plots/lead_both_hpc-full.png",
+    "plots/lead_hpc-full.png",
+    "plots/reliability_hpc-full.png",
+    "plots/split_hpc-full.png",
+    "plots/tft_eval_hpc-full.png",
+    "plots/xgb_eval_hpc-full.png",
+    "plots/xgb_training_hpc-full.png",
+    "results/deviation_flood_hpc-full.csv",
+    "results/deviation_storm_hpc-full.csv",
+    "results/leads_both_hpc-full.csv",
+    "results/leads_hpc-full.csv",
+    "results/leads_hpc-full.json",
+    "results/params_hpc-full.json",
+    "results/results_hpc-full.json",
+    "results/summary_hpc-full.csv",
+    "results/tft_hpc-full.json",
+    "results/tft_leads_hpc-full.json",
+    "results/xgb_hpc-full.json",
+    "tft_logs/flood/hparams.yaml",
+    "tft_logs/flood/metrics.csv",
+    "tft_logs/flood_l1/hparams.yaml",
+    "tft_logs/flood_l1/metrics.csv",
+    "tft_logs/flood_l2/hparams.yaml",
+    "tft_logs/flood_l2/metrics.csv",
+    "tft_logs/flood_l3/hparams.yaml",
+    "tft_logs/flood_l3/metrics.csv",
+    "tft_logs/storm/hparams.yaml",
+    "tft_logs/storm/metrics.csv",
+    "tft_logs/storm_l1/hparams.yaml",
+    "tft_logs/storm_l1/metrics.csv",
+    "tft_logs/storm_l2/hparams.yaml",
+    "tft_logs/storm_l2/metrics.csv",
+    "tft_logs/storm_l3/hparams.yaml",
+    "tft_logs/storm_l3/metrics.csv"
+  ],
+  "warm_parents": {},
+  "self_contained": true
+}

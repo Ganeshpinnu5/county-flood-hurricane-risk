@@ -1,0 +1,156 @@
+{
+  "flood": {
+    "model": "xgboost_monotone",
+    "val": {
+      "ap": 0.3274074471640248,
+      "prevalence": 0.011517241936395873,
+      "lift": 28.42759134280038
+    },
+    "test": {
+      "ap": 0.2650030470359508,
+      "prevalence": 0.01049411309042471,
+      "lift": 25.252543473897877
+    },
+    "best_baseline": "single_ratio_fwd3",
+    "best_baseline_ap": 0.19892958310368652,
+    "vs_best_baseline": 1.3321449876955973,
+    "best_iteration": 194,
+    "n_train_pos": 20734,
+    "n_test_pos": 8020,
+    "baselines": {
+      "constant_prevalence": 0.01049411309042471,
+      "single_ratio_fwd3": 0.19892958310368652,
+      "single_prcp_fwd3": 0.19140933202337818,
+      "single_prcp_fwd3_max": 0.17003309702299702,
+      "single_prcp_prev30": 0.018801415801166333,
+      "single_ratio_prev3": 0.01928071525562135,
+      "single_log_fwd3": 0.19136753834349868,
+      "single_pop_density": 0.021568123004332702,
+      "single_cyc_dist2": 0.014036276013306013,
+      "single_cyc_dist_min": 0.01439266560748313,
+      "single_cyc_in34": 0.012507195059957421,
+      "single_cyc_cone_margin": 0.014044077198663815,
+      "month_climatology": 0.016987162514237666
+    },
+    "top_features": [
+      [
+        "ratio_fwd3",
+        0.62463
+      ],
+      [
+        "prcp_fwd3",
+        0.05216
+      ],
+      [
+        "log_fwd3",
+        0.05098
+      ],
+      [
+        "month_cos",
+        0.02153
+      ],
+      [
+        "lon",
+        0.01849
+      ],
+      [
+        "pop_density",
+        0.01616
+      ],
+      [
+        "prcp_fwd3_max",
+        0.01486
+      ],
+      [
+        "ratio_prev30",
+        0.01419
+      ],
+      [
+        "lat",
+        0.01226
+      ],
+      [
+        "tmin",
+        0.01202
+      ]
+    ],
+    "beats_baseline": true
+  },
+  "storm": {
+    "model": "xgboost_monotone",
+    "val": {
+      "ap": 0.4129579287016624,
+      "prevalence": 0.002583261306816805,
+      "lift": 159.85913914784146
+    },
+    "test": {
+      "ap": 0.5411468688964081,
+      "prevalence": 0.003836863270319488,
+      "lift": 141.03887232117808
+    },
+    "best_baseline": "single_cyc_dist2",
+    "best_baseline_ap": 0.3169877028124953,
+    "vs_best_baseline": 1.707154139088189,
+    "best_iteration": 20,
+    "n_train_pos": 4303,
+    "n_test_pos": 2246,
+    "baselines": {
+      "constant_prevalence": 0.003836863270319488,
+      "single_ratio_fwd3": 0.06619178409301557,
+      "single_prcp_fwd3": 0.09540648923871577,
+      "single_prcp_fwd3_max": 0.09126996265226966,
+      "single_prcp_prev30": 0.006530082829442652,
+      "single_ratio_prev3": 0.004632146471530178,
+      "single_log_fwd3": 0.09536823869122504,
+      "single_pop_density": 0.006269143970418728,
+      "single_cyc_dist2": 0.3169877028124953,
+      "single_cyc_dist_min": 0.3037827911697979,
+      "single_cyc_in34": 0.26020168350296274,
+      "single_cyc_cone_margin": 0.24657823418849134,
+      "month_climatology": 0.00995191701727246
+    },
+    "top_features": [
+      [
+        "cyc_in34",
+        0.49509
+      ],
+      [
+        "cyc_cone_margin",
+        0.20362
+      ],
+      [
+        "cyc_in_cone",
+        0.07568
+      ],
+      [
+        "cyc_dist2",
+        0.07222
+      ],
+      [
+        "prcp_fwd3",
+        0.0231
+      ],
+      [
+        "cyc_vmax_max",
+        0.01834
+      ],
+      [
+        "cyc_vmax_close",
+        0.01802
+      ],
+      [
+        "log_fwd3",
+        0.01024
+      ],
+      [
+        "tmin",
+        0.00885
+      ],
+      [
+        "prcp_fwd3_max",
+        0.00799
+      ]
+    ],
+    "beats_baseline": true
+  }
+}

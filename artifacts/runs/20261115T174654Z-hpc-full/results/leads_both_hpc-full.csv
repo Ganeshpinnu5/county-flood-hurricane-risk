@@ -1,0 +1,7 @@
+hazard,lead,prevalence,baseline,baseline_AP,xgb_AP,xgb_vs_base,tft_AP,tft_vs_base,tft_epochs,tft_windows
+flood,+1 day,0.003729,single_ratio_fwd3,0.09035,0.17801,1.97,0.11781,1.3,7,756501
+flood,+2 day,0.003715,single_ratio_fwd3,0.10824,0.13004,1.2,0.14895,1.38,26,756501
+flood,+3 day,0.003711,single_ratio_fwd3,0.05325,0.07768,1.46,0.0668,1.25,7,756501
+storm,+1 day,0.00128,single_cyc_dist_min,0.17383,0.48286,2.78,0.30958,1.78,10,579263
+storm,+2 day,0.00128,single_cyc_dist2,0.17582,0.39148,2.23,0.24179,1.38,30,579263
+storm,+3 day,0.00128,single_cyc_cone_margin,0.10546,0.21687,2.06,0.13257,1.26,10,579263

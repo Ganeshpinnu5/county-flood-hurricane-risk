@@ -41,3 +41,15 @@ artifacts/proto_xgb_*.json
 !refdata/*.csv
 !docs/data/*.json
 !artifacts/stage4/*.json
+artifacts/*.log
+
+# Raw NHC a-deck downloads, 477 files and 324 MB. fetch_nhc_adeck.py
+# re-fetches them and only the derived parquet is read, which *.parquet
+# already excludes. Upstream data, not ours to republish.
+artifacts/adeck/
+
+# pptxgenjs and its dependency tree, pulled in only to build the capstone deck.
+node_modules/
+
+# LibreOffice lock files from a .docx left open in an editor.
+.~lock.*#

@@ -31,7 +31,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install "pandas>=2.0" numpy requests xgboost
+      # xgboost is pinned to the version the published boosters were fitted
+      # under. Unpinned, a future major gets to reinterpret a saved booster in
+      # the one job no human watches, and the first sign would be a live
+      # forecast that silently disagrees with the published test AP.
+      - run: pip install "pandas>=2.0" numpy requests "xgboost==3.2.0"
 
       - name: Rebuild the live window
         run: python fetch_live.py

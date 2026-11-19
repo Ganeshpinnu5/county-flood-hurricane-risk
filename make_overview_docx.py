@@ -25,7 +25,7 @@ ROOT = pathlib.Path(__file__).parent
 RUNS = ROOT / "artifacts" / "runs"
 # The newest full run carrying the cyclone feature block. Overridable so the
 # document can be rebuilt against whichever run is being cited.
-DEFAULT_RUN = "20261108T225052Z-run"
+DEFAULT_RUN = "20261115T174654Z-hpc-full"
 
 AUTHOR = "Ganesh Pinnu"
 
@@ -344,8 +344,9 @@ def build(run_id):
               "list. Whether a cyclone crosses a county is not a function of "
               "its social vulnerability; those columns described who would be "
               "harmed, not whether the hazard was coming. The cost of "
-              "removing them was measured first: flood 0.26334 to 0.26190, "
-              "storm 0.53857 to 0.53294.")
+              "removing them was measured first, on the November 2026 run "
+              "that preceded this one: flood 0.26334 to 0.26190, storm "
+              "0.53857 to 0.53294. The decision carried forward unchanged.")
 
     # -- 5. models
     doc.add_heading("5. Models", level=1)

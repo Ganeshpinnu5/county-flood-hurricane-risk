@@ -1,6 +1,11 @@
 # County Flood & Hurricane Risk
 
-**[Open the dashboard →](https://ganeshpinnu5.github.io/county-flood-hurricane-risk/)**
+> **This repository has moved.** Development and the live dashboard are now at
+> [Sudarshan006/gulf-county-flood-hurricane-risk](https://github.com/Sudarshan006/gulf-county-flood-hurricane-risk).
+> Nothing here is refreshed any more; the daily forecast job runs there. What
+> remains is kept as the published history up to 18 November 2026.
+
+**[Open the dashboard →](https://sudarshan006.github.io/gulf-county-flood-hurricane-risk/)**
 
 Pick any county in the lower 48 and see the live 4-day weather forecast, any
 National Weather Service warning in force right now, and — across the Gulf

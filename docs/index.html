@@ -3,209 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>County Flood &amp; Hurricane Risk</title>
-<link rel="stylesheet" href="styles.css">
+<title>Moved &mdash; County Flood &amp; Hurricane Risk</title>
+<link rel="canonical" href="https://sudarshan006.github.io/gulf-county-flood-hurricane-risk/">
+<meta http-equiv="refresh" content="0; url=https://sudarshan006.github.io/gulf-county-flood-hurricane-risk/">
+<style>
+  :root { color-scheme: dark light; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+         background: #0e1116; color: #e6edf3; text-align: center;
+         font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 34rem; padding: 2rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+  p { color: #9aa7b4; }
+  a { color: #6cb6ff; }
+</style>
 </head>
 <body>
 
-<header>
-  <div class="titrow">
-    <h1>County Flood &amp; Hurricane Risk</h1>
-    <div class="theme" role="group" aria-label="Colour theme">
-      <button data-set-theme="dark">Dark</button>
-      <button data-set-theme="light">Light</button>
-    </div>
-  </div>
-</header>
+<main>
+  <h1>This dashboard has moved</h1>
+  <p>The project is published from the team account now. You should be
+     redirected automatically.</p>
+  <p><a href="https://sudarshan006.github.io/gulf-county-flood-hurricane-risk/">Open
+     the current dashboard &rarr;</a></p>
+  <p>Source:
+     <a href="https://github.com/Sudarshan006/gulf-county-flood-hurricane-risk">github.com/Sudarshan006/gulf-county-flood-hurricane-risk</a></p>
+</main>
 
-<!-- The live cross-check, above the map because it is the one number on the
-     page that changes while you watch it. -->
-<section class="sb">
-  <div class="sb-top">
-    <h2>Model vs. National Weather Service, right now</h2>
-    <span class="sb-live"><i></i>live</span>
-  </div>
-  <div id="sb-body" class="sb-grid"></div>
-</section>
-
-<div class="controls">
-  <div class="ctl">
-    <span class="ctl-label">View</span>
-    <div class="seg" id="mode-seg">
-      <button data-mode="live" class="on">Live forecast</button>
-      <button data-mode="history">Past events</button>
-    </div>
-  </div>
-
-  <div class="ctl">
-    <span class="ctl-label">Date</span>
-    <div class="daybar">
-      <button id="d-prev" title="Previous day">&larr;</button>
-      <input type="date" id="d-date">
-      <button id="d-next" title="Next day">&rarr;</button>
-    </div>
-  </div>
-
-  <div class="ctl">
-    <span class="ctl-label">Map shows</span>
-    <div class="seg" id="haz-seg">
-      <button data-haz="flood" class="on">Flood risk</button>
-      <button data-haz="storm">Hurricane risk</button>
-    </div>
-  </div>
-</div>
-
-<p class="note" id="date-note"></p>
-
-<div class="layout">
-  <!-- ----------------------------------------------------------- map -->
-  <div class="mapcol">
-    <div class="mapwrap">
-      <svg id="map" class="map" viewBox="0 0 960 560" role="img"
-           aria-label="Gulf Coast counties shaded by hazard risk"></svg>
-      <div class="legend" id="legend"></div>
-    </div>
-    <h3>Highest risk today</h3>
-    <table id="top-table">
-      <thead><tr>
-        <th>#</th><th>County</th><th class="num">Flood</th>
-        <th class="num">Hurricane</th><th class="num">3-day rain</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <!-- -------------------------------------------------------- detail -->
-  <aside class="detail" id="detail">
-    <div class="empty" id="detail-empty">
-      <p><strong>Select a county</strong></p>
-      <label class="pickwrap">
-        <select id="county-pick"></select>
-      </label>
-    </div>
-
-    <div id="detail-body" class="hidden">
-      <div class="dhead">
-        <div>
-          <h2 id="d-name"></h2>
-          <p class="quiet" id="d-sub"></p>
-        </div>
-        <button id="d-close" class="ghost" title="Clear selection">&times;</button>
-      </div>
-
-      <div id="d-outcome"></div>
-
-      <div class="riskgrid">
-        <div class="riskcard" id="rc-flood">
-          <span class="rc-label">Flood</span>
-          <span class="rc-band" id="rc-flood-band"></span>
-          <span class="rc-num" id="rc-flood-num"></span>
-          <div class="rc-bar"><i id="rc-flood-bar"></i></div>
-        </div>
-        <div class="riskcard" id="rc-storm">
-          <span class="rc-label">Hurricane / tropical storm</span>
-          <span class="rc-band" id="rc-storm-band"></span>
-          <span class="rc-num" id="rc-storm-num"></span>
-          <div class="rc-bar"><i id="rc-storm-bar"></i></div>
-        </div>
-      </div>
-      <h3>Model vs. official</h3>
-      <div id="d-live" class="lcheck"></div>
-
-      <h3>By lead time</h3>
-      <div id="d-leads" class="leadblock"></div>
-
-      <h3>Warnings in force</h3>
-      <div id="d-alerts" class="alerts">
-        <p class="quiet">Loading from weather.gov&hellip;</p>
-      </div>
-
-      <h3>Forecast</h3>
-      <div id="d-forecast" class="fc">
-        <p class="quiet">Loading from Open-Meteo&hellip;</p>
-      </div>
-
-      <h3>Past events</h3>
-      <div id="d-events" class="events"></div>
-    </div>
-  </aside>
-</div>
-
-<!-- ---------------------------------------------------------- model card -->
-<section class="modelcard">
-  <!-- The audit trail the project is graded on, collapsed by default: the page
-       is a forecast application first, and the evidence is one click away. -->
-  <details class="mc">
-  <summary>Model performance, limits and provenance</summary>
-
-  <div class="cards" id="mc-cards"></div>
-
-  <!-- ----------------------------------------------- lead time / headline -->
-  <h3>Skill by lead time</h3>
-  <p class="note">
-    Each lead has its own model, scored on its own target against the strongest
-    single-feature baseline for that target.
-  </p>
-  <div class="cards" id="mc-lead-cards"></div>
-  <p class="note" id="lead-read"></p>
-  <div class="tscroll">
-    <table id="mc-leads">
-      <thead><tr>
-        <th>Hazard</th><th class="num">Lead</th><th class="num">Base rate</th>
-        <th class="num">Baseline</th><th class="num">XGBoost</th>
-        <th class="num">vs base</th><th class="num tft-col">TFT</th>
-        <th class="num tft-col">vs base</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-  <p class="note" id="lead-foot"></p>
-
-  <h3 id="mc-arch-h">Gradient boosting vs. the Temporal Fusion Transformer</h3>
-  <p class="note" id="mc-arch-note">
-    Same panel, same splits, same label. The transformer sees a 30-day encoder
-    window per county, trains with a positive-class weight of 50, and is
-    calibrated by isotonic regression fitted on validation.
-  </p>
-  <div class="tscroll">
-    <table id="mc-table">
-      <thead><tr>
-        <th>Hazard</th><th>Model</th><th class="num">Average precision</th>
-        <th class="num">Base rate</th><th class="num">Lift</th>
-        <th class="num">vs best baseline</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-  <p class="note" id="mc-verdict"></p>
-
-  <h3>What it had to beat</h3>
-  <p class="note">
-    No model is accepted until it beats every one of these — one raw feature, or
-    the historical rate for the calendar month.
-  </p>
-  <div class="tscroll">
-    <table id="mc-baselines">
-      <thead><tr>
-        <th>Hazard</th><th>Baseline</th><th class="num">Average precision</th>
-        <th class="num">Model / baseline</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <h3>Known limits</h3>
-  <ul class="limits" id="mc-limits"></ul>
-
-  <h3>Provenance</h3>
-  <p class="note" id="mc-prov"></p>
-  </details>
-</section>
-
-<footer>
-  <span id="ft-prov"></span>
-</footer>
-
-<script src="app.js"></script>
 </body>
 </html>
